@@ -136,24 +136,17 @@ static func title_for(level_id: int) -> String:
 	return "%s %d" % [get_chapter(chapter)["name"], index + 1]
 
 
-## A stable, per-level colour order. The palette is shuffled with a hash of the
-## level id and a salt that never includes the solution, so colours stay
-## independent of where the cats are.
+## A stable, per-level colour order. Hues are spaced evenly around the wheel
+## with a per-level offset, so no two territories can look alike — the old
+## palette could hand a four-territory board three near-identical yellows.
+## The offset hash never includes the solution, so colour cannot leak cats.
 static func colors_for(level_id: int, n: int) -> Array:
-	var order: Array = []
 	var colors: Array = []
-	for i in range(PALETTE.size()):
-		order.append(i)
-	var rng := RandomNumberGenerator.new()
-	rng.seed = level_id * 2246822519 + 3266489917
-	# Walk the palette in hue order with an even stride: neighbouring regions
-	# then never share a near-identical orange or green, which matters on a
-	# phone in daylight. The offset keeps each puzzle feeling different.
-	order.sort_custom(func(a: int, b: int) -> bool:
-		return Color(String(PALETTE[a])).h < Color(String(PALETTE[b])).h)
-	var offset := rng.randi_range(0, order.size() - 1)
-	var stride := float(order.size()) / float(maxi(1, n))
-	for i in range(n):
-		var pick := int(order[(offset + int(round(float(i) * stride))) % order.size()])
-		colors.append(String(PALETTE[pick]))
+	var count := maxi(1, n)
+	var step := 360.0 / float(count)
+	var offset := float((level_id * 137 + 53) % 360)
+	for i in range(count):
+		var hue := fposmod(offset + step * float(i), 360.0) / 360.0
+		var color := Color.from_hsv(hue, 0.56, 0.93)
+		colors.append("#" + color.to_html(false))
 	return colors

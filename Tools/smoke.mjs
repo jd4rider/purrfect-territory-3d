@@ -116,11 +116,31 @@ if (state && state.probe) {
   })
   const tapX = canvasRect.left + (x / state.canvas.w) * canvasRect.width
   const tapY = canvasRect.top + (y / state.canvas.h) * canvasRect.height
+  // A single tap only crosses the square out…
   await page.touchscreen.tap(tapX, tapY)
+  state = await waitForState(
+    page,
+    (s) => Array.isArray(s.marks) && Array.isArray(s.marks[row]) && s.marks[row][col] === true,
+    8000,
+  )
+  console.log('after single tap', JSON.stringify(state))
+  if (!state || !state.marks[row][col]) {
+    failures.push(`phone: one tap on (${row},${col}) at ${x},${y} must cross the square out`)
+  }
+  if (state && state.cats[row] === col) failures.push('phone: a single tap must not place a cat')
+  await page.screenshot({ path: '/tmp/pt-shots/crossed.png' })
+
+  // …and a quick double tap commits the cat.
+  await page.waitForTimeout(600)
+  const firstTap = Date.now()
+  await page.touchscreen.tap(tapX, tapY)
+  const secondTap = Date.now()
+  await page.touchscreen.tap(tapX, tapY)
+  console.log('double tap gap ms', Date.now() - firstTap, 'between taps', secondTap - firstTap)
   state = await waitForState(page, (s) => Array.isArray(s.cats) && s.cats[row] === col, 8000)
-  console.log('after tap', JSON.stringify(state))
+  console.log('after double tap', JSON.stringify(state))
   if (!state || state.cats[row] !== col) {
-    failures.push(`phone: tapping board square (${row},${col}) at ${x},${y} did not place a cat`)
+    failures.push(`phone: double-tapping board square (${row},${col}) did not place a cat`)
   }
   await page.screenshot({ path: '/tmp/pt-shots/placed.png' })
 }

@@ -4,7 +4,7 @@ extends Control
 const PAGES: Array = [
 	{
 		"title": "One cat in every row",
-		"body": "Every row of the tray gets exactly one cat. The row is easy to see, so start there when you feel stuck.",
+		"body": "Every row of the tray gets exactly one cat. Tap a square to cross it out, and double-tap it to place your cat.",
 	},
 	{
 		"title": "One cat in every column",

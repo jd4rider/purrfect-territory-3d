@@ -32,8 +32,7 @@ var timer_label: Label
 var progress_label: Label
 var toast_label: Label
 var toast_timer: Timer
-var cat_button: Button
-var note_button: Button
+var legend_row: HBoxContainer
 var hint_count_label: Label
 var win_layer: Control
 var win_card: VBoxContainer
@@ -74,8 +73,10 @@ func _start_board() -> void:
 		"reduced_motion": bool(Save.get_setting("reduced_motion", false)),
 	})
 	board.cell_tapped.connect(_on_cell)
+	board.cell_double_tapped.connect(_on_double_cell)
 	board.fit_camera()
 	_sync_board()
+	_show_toast("Tap to cross out · double-tap to place a cat")
 
 
 func _process(delta: float) -> void:
@@ -123,6 +124,12 @@ func _build_hud() -> void:
 	progress_label = Ui.label("0 / %d cats" % n, 13, Ui.MUTED, HORIZONTAL_ALIGNMENT_RIGHT)
 	meta.add_child(progress_label)
 
+	# The colours still missing a cat, in the same order as the territories.
+	# A chip fades once its territory's cat is on the tray.
+	legend_row = Ui.row(6)
+	legend_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	top_column.add_child(legend_row)
+
 	# toast sits just above the controls, where the eye already is
 	toast_label = Ui.label("", 16, Ui.GOLD, HORIZONTAL_ALIGNMENT_CENTER, true)
 	toast_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
@@ -150,13 +157,6 @@ func _build_hud() -> void:
 	var controls := Ui.column(10)
 	bottom.add_child(controls)
 
-	var modes := Ui.row(10)
-	controls.add_child(modes)
-	cat_button = _mode_button("Place cat", true, func() -> void: _set_mode(false))
-	note_button = _mode_button("Paw note", false, func() -> void: _set_mode(true))
-	modes.add_child(cat_button)
-	modes.add_child(note_button)
-
 	var actions := Ui.row(8)
 	controls.add_child(actions)
 	actions.add_child(_action("Undo", func() -> void: _undo()))
@@ -168,26 +168,10 @@ func _build_hud() -> void:
 	actions.add_child(_action("Reset", func() -> void: _reset()))
 
 
-func _mode_button(text: String, active: bool, on_press: Callable) -> Button:
-	var node := Ui.ghost(text, on_press, 52, 16, 10)
-	node.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	node.toggle_mode = true
-	node.button_pressed = active
-	return node
-
-
 func _action(text: String, on_press: Callable) -> Button:
 	var node := Ui.ghost(text, on_press, 58, 16, 8)
 	node.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	return node
-
-
-func _set_mode(note: bool) -> void:
-	mark_mode = note
-	cat_button.button_pressed = not note
-	note_button.button_pressed = note
-	Audio.ui_click()
-	_show_toast("Tap a square to place a paw note." if note else "Tap a square to place its cat.")
 
 
 func _show_toast(text: String) -> void:
@@ -202,16 +186,21 @@ func _show_toast(text: String) -> void:
 # play
 # --------------------------------------------------------------------------
 
+## A single tap is the reversible action: cross the square out (or clear it).
 func _on_cell(row: int, col: int) -> void:
 	if solved or row < 0 or col < 0 or row >= n or col >= n:
 		return
-	if mark_mode:
-		if int(cats[row]) == col:
-			return
-		_push_undo()
-		marks[row][col] = not bool(marks[row][col])
-		Audio.mark()
-		_sync_board()
+	if int(cats[row]) == col:
+		return
+	_push_undo()
+	marks[row][col] = not bool(marks[row][col])
+	Audio.mark()
+	_sync_board()
+
+
+## A quick second tap on the same square commits the cat, minesweeper style.
+func _on_double_cell(row: int, col: int) -> void:
+	if solved or row < 0 or col < 0 or row >= n or col >= n:
 		return
 	if int(cats[row]) == col:
 		_push_undo()
@@ -357,7 +346,53 @@ func _sync_board() -> void:
 		board.sync(cats, marks)
 	var placed := PuzzleModel.count_cats(cats)
 	progress_label.text = "%d / %d cats" % [placed, n]
+	_refresh_legend()
 	_update_hint_count()
+
+
+func _level_colors() -> Array:
+	var stored: Array = level.get("colors", [])
+	if stored.is_empty():
+		return Chapters.colors_for(int(level.get("id", 1)), n)
+	return stored
+
+
+## Rebuilds the "cats still to find" strip. Each territory contributes one
+## chip in its own colour; a placed cat empties its chip to a faint ring.
+func _refresh_legend() -> void:
+	if legend_row == null:
+		return
+	for child in legend_row.get_children():
+		child.queue_free()
+	var palette := _level_colors()
+	for reg in range(n):
+		var revealed := false
+		for r in range(n):
+			var c := int(cats[r])
+			if c >= 0 and regions[r * n + c] == reg:
+				revealed = true
+				break
+		var hex := String(palette[reg % palette.size()])
+		legend_row.add_child(_legend_chip(Color(hex), revealed))
+
+
+func _legend_chip(color: Color, revealed: bool) -> Control:
+	var node := Control.new()
+	node.custom_minimum_size = Vector2(26, 26)
+	node.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	node.draw.connect(func() -> void:
+		var center := Vector2(13, 13)
+		if revealed:
+			node.draw_arc(center, 9.5, 0.0, TAU, 28, Color(color, 0.42), 2.0)
+			return
+		node.draw_circle(center, 11.0, color)
+		node.draw_arc(center, 11.0, 0.0, TAU, 28, Color(1, 1, 1, 0.4), 1.5)
+		var ink := Color(0.10, 0.06, 0.13, 0.75)
+		node.draw_circle(center + Vector2(0, 1.6), 4.2, ink)
+		node.draw_circle(center + Vector2(-4.4, -3.0), 1.9, ink)
+		node.draw_circle(center + Vector2(0, -4.4), 1.9, ink)
+		node.draw_circle(center + Vector2(4.4, -3.0), 1.9, ink))
+	return node
 
 
 func _update_hint_count() -> void:
@@ -506,6 +541,10 @@ func _leave() -> void:
 
 func debug_tap(row: int, col: int) -> void:
 	_on_cell(row, col)
+
+
+func debug_double_tap(row: int, col: int) -> void:
+	_on_double_cell(row, col)
 
 
 func debug_solve() -> void:

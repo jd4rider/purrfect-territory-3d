@@ -9,6 +9,7 @@ extends Node3D
 ## resolution.
 
 signal cell_tapped(row: int, col: int)
+signal cell_double_tapped(row: int, col: int)
 
 const TILE_MODEL := "res://Assets/Models/tile.glb"
 const CAT_MODEL := "res://Assets/Models/cat.glb"
@@ -45,7 +46,11 @@ var _zoom := 1.0
 var _time := 0.0
 var _fit_pending := true
 var _last_engine_pointer_ms := -10000
+var _last_tap_ms := -10000
+var _last_tap_cell := Vector2i(-1, -1)
 var _web_touch_cb: JavaScriptObject
+
+const DOUBLE_TAP_MS := 450
 
 
 func _ready() -> void:
@@ -83,7 +88,7 @@ func _on_web_touch(args: Array) -> void:
 	var cell := cell_at(position)
 	if cell.x < 0:
 		return
-	cell_tapped.emit(cell.x, cell.y)
+	_handle_tap(cell)
 
 
 func _build_tree() -> void:
@@ -162,7 +167,7 @@ func build_showcase() -> void:
 		"n": n2,
 		"regions": _to_array(regions),
 		"solution": solution,
-		"colors": ["#f2cf6b", "#8fd9c3", "#c79be8", "#f0a6bd"],
+		"colors": Chapters.colors_for(9001, n2),
 	}
 	build(level, {"showcase": true})
 	sync(solution, _blank_marks(n2))
@@ -482,38 +487,32 @@ func sync(cats: Array, marks: Array) -> void:
 			if r < marks.size() and c < (marks[r] as Array).size():
 				marked = bool(marks[r][c])
 			if marked and not _marks.has(key):
-				var paw := _make_paw()
-				paw.position = Vector3(float(c) - half, TILE_TOP + 0.02, float(r) - half)
-				mark_root.add_child(paw)
-				_marks[key] = paw
+				var cross := _make_cross()
+				cross.position = Vector3(float(c) - half, TILE_TOP + 0.02, float(r) - half)
+				mark_root.add_child(cross)
+				_marks[key] = cross
 			elif not marked and _marks.has(key):
 				(_marks[key] as Node3D).queue_free()
 				_marks.erase(key)
 
 
-func _make_paw() -> Node3D:
+## A crisp X on the tile: minesweeper's cheap, reversible "not here" mark.
+func _make_cross() -> Node3D:
 	var root := Node3D.new()
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color("#7a5167")
-	mat.roughness = 0.9
-	var pad := SphereMesh.new()
-	pad.radius = 0.12
-	pad.height = 0.24
-	var body := MeshInstance3D.new()
-	body.mesh = pad
-	body.material_override = mat
-	body.scale = Vector3(1.0, 0.16, 1.0)
-	root.add_child(body)
-	for offset in [Vector2(-0.13, -0.11), Vector2(0.0, -0.17), Vector2(0.13, -0.11)]:
-		var toe := MeshInstance3D.new()
-		var sphere := SphereMesh.new()
-		sphere.radius = 0.055
-		sphere.height = 0.11
-		toe.mesh = sphere
-		toe.material_override = mat
-		toe.position = Vector3(offset.x, 0.0, offset.y)
-		toe.scale = Vector3(1.0, 0.18, 1.0)
-		root.add_child(toe)
+	mat.albedo_color = Color("#3b2545")
+	mat.roughness = 0.86
+	mat.emission_enabled = true
+	mat.emission = Color("#2a1d33")
+	mat.emission_energy_multiplier = 0.12
+	for angle in [45.0, -45.0]:
+		var bar := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(0.58, 0.045, 0.12)
+		bar.mesh = box
+		bar.material_override = mat
+		bar.rotation_degrees.y = angle
+		root.add_child(bar)
 	return root
 
 
@@ -599,6 +598,21 @@ func _unhandled_input(event: InputEvent) -> void:
 	if cell.x < 0:
 		return
 	get_viewport().set_input_as_handled()
+	_handle_tap(cell)
+
+
+## One tap crosses a square out; a quick second tap on the same square places
+## a cat. The cheap, reversible action is the easy gesture, and committing a
+## cat takes a deliberate double tap — minesweeper muscle memory.
+func _handle_tap(cell: Vector2i) -> void:
+	var now := Time.get_ticks_msec()
+	if cell == _last_tap_cell and now - _last_tap_ms <= DOUBLE_TAP_MS:
+		_last_tap_ms = -10000
+		_last_tap_cell = Vector2i(-1, -1)
+		cell_double_tapped.emit(cell.x, cell.y)
+		return
+	_last_tap_ms = now
+	_last_tap_cell = cell
 	cell_tapped.emit(cell.x, cell.y)
 
 
