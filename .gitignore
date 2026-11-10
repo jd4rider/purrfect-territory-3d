@@ -12,3 +12,4 @@ web/play/arcade-client.js
 web/play/.nojekyll
 web/play/.gdignore
 .DS_Store
+site/

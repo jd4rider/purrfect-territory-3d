@@ -1,0 +1,11 @@
+{
+  "name": "Purrfect Territory 3D",
+  "short_name": "Purrfect",
+  "description": "A cosy 3D cat territory logic puzzle: one cat per row, column and territory, and no two cats touch.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#120c1a",
+  "theme_color": "#241830"
+}
