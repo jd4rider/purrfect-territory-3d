@@ -2,7 +2,7 @@
 
 Build under test: `1.0.0`, Godot **4.7.2 stable** (Compatibility renderer),
 Blender **5.2.4** for assets, exported single-threaded Web build
-(`index.wasm` 37.7 MB, `index.pck` ~4.2 MB).
+(`index.wasm` 37.7 MB, `index.pck` 1.9 MB).
 
 ## Automated
 

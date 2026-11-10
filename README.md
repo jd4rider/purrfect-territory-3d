@@ -4,7 +4,7 @@ A cosy, portrait-first **3D cat territory logic puzzle** for Little Joy Arcade.
 One cat per row, one per column, one per territory — and no two cats may touch,
 not even corner to corner.
 
-Play: <https://jd4rider.github.io/purrfect-territory-3d/>
+Play: <https://littlejoyarcade.site/games/purrfect-territory-3d/>
 
 Built with Godot 4.7.2 (Compatibility renderer, single-threaded Web export) and
 Blender 5.2 for the cat, tiles, tray and yarn. No third-party art or audio.
@@ -46,7 +46,9 @@ python3 Tools/patch_web.py
 `Tools/patch_web.py` adds the arcade bridge, the full-bleed phone framing, the
 manifest and the drop-in arcade client. The GitHub workflow runs exactly these
 steps and publishes `web/play` to the `gh-pages` branch; Pages serves that branch
-at the URL above. The branch publish is deliberate: artifact deployments on this
+at the URL above. The game currently ships from the arcade origin, because
+GitHub Pages for this repository stalls at `syncing_files`; the same build is
+mirrored in `site/` so it can be served from Pages once that clears. The branch publish is deliberate: artifact deployments on this
 account stall in `syncing_files`.
 
 Local browser check:
