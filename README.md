@@ -16,7 +16,7 @@ Blender 5.2 for the cat, tiles, tray and yarn. No third-party art or audio.
 | Path | What it is |
 |---|---|
 | `Scripts/Puzzle/` | Rules, exact solution counter, territory generator, human-style deduction solver, novelty checks, level factory |
-| `Scripts/Board/` | The 3D tray: tiles, grout, cats, paw notes, camera fitting, picking |
+| `Scripts/Board/` | The 3D tray: tiles, grout, cats, X marks, camera fitting, picking |
 | `Scripts/Screens/` | Title, chapters, level grid, game, settings, tutorial, trophies |
 | `Scripts/Core/` | Save schema, audio, Little Joy Arcade bridge, catalog loader, router, UI kit |
 | `Data/levels.json` | The 1,000 committed campaign puzzles |
