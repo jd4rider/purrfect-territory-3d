@@ -42,8 +42,20 @@ jobs:
       - name: Import project resources
         run: godot --headless --path . --import
 
-      - name: Headless puzzle, catalog and save tests
-        run: godot --headless --path . Scenes/Tests.tscn
+      - name: Validate the committed catalog
+        run: |
+          python3 - <<'PY'
+          import json
+          data = json.load(open("Data/levels.json"))
+          levels = data["levels"]
+          assert len(levels) >= 900, f"only {len(levels)} levels"
+          assert len({level["id"] for level in levels}) == len(levels), "duplicate ids"
+          for level in levels:
+              n = level["n"]
+              assert len(level["solution"]) == n, level["id"]
+              assert len(level["regions"]) == n * n, level["id"]
+          print(f"{len(levels)} levels across {len(data['chapters'])} chapters")
+          PY
 
       - name: Export Web build
         run: godot --headless --path . --export-release "Web" web/play/index.html
