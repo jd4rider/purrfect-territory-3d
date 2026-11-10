@@ -1,0 +1,38 @@
+{
+  "id": "purrfect-territory-3d",
+  "name": "Purrfect Territory 3D",
+  "tagline": "One cat per row, column and territory.",
+  "description": "A cosy 3D cat territory logic puzzle built in Godot 4 and exported to the web. A wooden tray of bevelled tiles sits on a lamplit table, each colour a territory, and every square you tap places a real Blender-modelled cat. Purrfect Territory 3D has 1,000 campaign puzzles across ten chapters, from Sunbeam Steps to Nine Lives Summit, plus a daily purr and endless practice. Every campaign board is generated once and committed only after an independent exact solver proves it has a single answer, then rated by a human-style deduction solver instead of by board size, so a small board can be genuinely tricky and a big one can be a gentle unwind. Hints name the rule they used. Your stars, streak and trophies sync through the Little Joy Arcade account, and the game keeps playing offline.",
+  "categories": ["Puzzle", "Logic", "Relaxing"],
+  "runtime": "Godot 4",
+  "version": "1.0.0",
+  "updated": "2026-11-09",
+  "status": "live",
+  "featured": true,
+  "playUrl": "https://jd4rider.github.io/purrfect-territory-3d/",
+  "siteUrl": "https://jd4rider.github.io/purrfect-territory-3d/",
+  "repoUrl": "https://github.com/jd4rider/purrfect-territory-3d",
+  "downloads": [],
+  "cover": { "from": "#f2cf6b", "to": "#241830", "emoji": "🐈" },
+  "highlights": [
+    "1,000 campaign puzzles over ten chapters, each proved to have exactly one answer by an independent solver",
+    "Difficulty rated by a human-style deduction solver — singles, territory-line logic and look-ahead depth — not by board size",
+    "A real 3D tray: Blender-authored bevelled tiles, a walnut board and an animated cat with a gentle idle bob",
+    "Paw-note mode, undo/redo, restart and hints that explain the exact rule they used",
+    "A daily purr and endless practice boards generated and validated on the device",
+    "Anti-predictability gate: canonical symmetry checks, arrangement distance and territory-shape similarity on every level",
+    "36 trophies, chapter progress, stars for clean solves and a two-minute tutorial",
+    "Accessibility: reduced motion, high-contrast territories, territory numbers for colour-blind play and optional mistake scatter",
+    "Little Joy Arcade account, cloud saves and streaks, with a local save that always works offline",
+    "Portrait-locked presentation with large touch targets, plus mouse and keyboard support"
+  ],
+  "howToPlay": [
+    "Tap a square to place that row's cat. Tap the same square again to take it back.",
+    "Every row, every column and every coloured territory holds exactly one cat.",
+    "No two cats may touch, not even corner to corner.",
+    "Tap Paw note to cross out squares you have ruled out, then Undo if you change your mind.",
+    "Hint explains the next forced cat and which rule proves it. Solve with no hints and no wrong guesses for three stars."
+  ],
+  "levels": "1,000 puzzles · 10 chapters · 4x4 to 10x10 + daily and endless practice",
+  "saveKey": "purrfect-territory-3d-save-v1"
+}

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="plum" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a2844"/>
+      <stop offset="1" stop-color="#150f1c"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffe8bd"/>
+      <stop offset="1" stop-color="#f2cf6b"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#plum)"/>
+  <g fill="url(#gold)">
+    <path d="M256 128c22 0 40 18 40 40s-18 52-40 52-40-30-40-52 18-40 40-40z"/>
+    <path d="M168 116l30-46c6-9 18-11 25-4l26 30c-28 10-48 34-54 62l-27-42z"/>
+    <path d="M344 116l-30-46c-6-9-18-11-25-4l-26 30c28 10 48 34 54 62l27-42z"/>
+    <ellipse cx="134" cy="262" rx="38" ry="46"/>
+    <ellipse cx="192" cy="212" rx="34" ry="42"/>
+    <ellipse cx="320" cy="212" rx="34" ry="42"/>
+    <ellipse cx="378" cy="262" rx="38" ry="46"/>
+    <path d="M256 300c62 0 112 46 112 96 0 34-28 56-64 56h-96c-36 0-64-22-64-56 0-50 50-96 112-96z"/>
+  </g>
+  <path d="M256 352c22 0 38 16 38 36 0 18-16 30-38 30s-38-12-38-30c0-20 16-36 38-36z" fill="#241830"/>
+</svg>
