@@ -15,6 +15,8 @@ var difficulty := "Medium"
 
 var cats: Array = []
 var marks: Array = []
+## Squares a wrong cat was swept from (r * n + c), so they stay red.
+var wrong_marks: Dictionary = {}
 var board: Board3D
 
 var undo_stack: Array = []
@@ -73,6 +75,7 @@ func _ready() -> void:
 	difficulty = String(level.get("difficulty", "Medium"))
 	cats = []
 	marks = []
+	wrong_marks.clear()
 	for r in range(n):
 		cats.append(-1)
 		var row: Array = []
@@ -318,6 +321,12 @@ func _commit_cat(row: int, col: int) -> bool:
 		_reject(row, col, problem)
 		return false
 	marks[row][col] = false
+	if not ExactSolver.has_completion(regions, n, cats):
+		# Legal square by square, but the board can no longer be finished. Put
+		# the tray back as it was and let the board show the cat being taken.
+		_undo_stack_pop_quiet()
+		_reject_doomed(row, col)
+		return false
 	Audio.place()
 	_sync_board()
 	_check_win()
@@ -407,8 +416,37 @@ func _reject(row: int, col: int, reason: String) -> void:
 	_sync_board()
 
 
+## A cat that follows the rules but still leaves the puzzle unfinishable. The
+## tray has already been rolled back, so the board is free to animate the cat
+## off its tile before the square settles as a red cross.
+func _reject_doomed(row: int, col: int) -> void:
+	mistakes += 1
+	Save.register_mistake()
+	Audio.wrong()
+	if board == null or not is_instance_valid(board):
+		_settle_wrong(row, col)
+		return
+	_show_toast("That cat can't be right — the board can't be finished with it.")
+	board.reject_cat(row, col, func() -> void: _settle_wrong(row, col))
+
+
+## Runs once the cat has been swept off the tile: the square becomes a red X so
+## the mistake is visible on the tray instead of simply vanishing.
+func _settle_wrong(row: int, col: int) -> void:
+	if solved or not _in_bounds(row, col):
+		return
+	marks[row][col] = true
+	wrong_marks[row * n + col] = true
+	if Save.get_setting("hearts", false) and mistakes % 3 == 0:
+		_show_toast("The cats scattered — the board is reset.")
+		_reset(false)
+		return
+	_sync_board()
+
+
 func _push_undo() -> void:
-	undo_stack.append({"cats": cats.duplicate(), "marks": _copy_marks()})
+	undo_stack.append({"cats": cats.duplicate(), "marks": _copy_marks(),
+		"wrong": wrong_marks.duplicate()})
 	if undo_stack.size() > 120:
 		undo_stack.pop_front()
 	redo_stack.clear()
@@ -420,6 +458,7 @@ func _undo_stack_pop_quiet() -> void:
 	var state: Dictionary = undo_stack.pop_back()
 	cats = (state["cats"] as Array).duplicate()
 	marks = (state["marks"] as Array).duplicate()
+	wrong_marks = (state["wrong"] as Dictionary).duplicate() if state.has("wrong") else {}
 
 
 func _copy_marks() -> Array:
@@ -439,6 +478,7 @@ func _undo() -> void:
 	var state: Dictionary = undo_stack.pop_back()
 	cats = (state["cats"] as Array).duplicate()
 	marks = (state["marks"] as Array).duplicate()
+	wrong_marks = (state["wrong"] as Dictionary).duplicate() if state.has("wrong") else {}
 	Audio.unplace()
 	_sync_board()
 
@@ -446,10 +486,12 @@ func _undo() -> void:
 func _redo() -> void:
 	if solved or redo_stack.is_empty():
 		return
-	undo_stack.append({"cats": cats.duplicate(), "marks": _copy_marks()})
+	undo_stack.append({"cats": cats.duplicate(), "marks": _copy_marks(),
+		"wrong": wrong_marks.duplicate()})
 	var state: Dictionary = redo_stack.pop_back()
 	cats = (state["cats"] as Array).duplicate()
 	marks = (state["marks"] as Array).duplicate()
+	wrong_marks = (state["wrong"] as Dictionary).duplicate() if state.has("wrong") else {}
 	Audio.place()
 	_sync_board()
 
@@ -463,6 +505,7 @@ func _reset(ask_sound := true) -> void:
 		cats[r] = -1
 		for c in range(n):
 			marks[r][c] = false
+	wrong_marks.clear()
 	mistakes = 0
 	hints_used = 0
 	elapsed = 0.0
@@ -665,6 +708,11 @@ func _restore_state() -> void:
 				continue
 			for c in range(n):
 				marks[r][c] = bool(row[c])
+	# Squares a wrong cat was swept from keep their red cross across a reload.
+	for key in _restore.get("wrong", []):
+		var index := int(key)
+		if index >= 0 and index < n * n:
+			wrong_marks[index] = true
 	elapsed = float(_restore.get("elapsed", 0.0))
 	hints_used = int(_restore.get("hints", 0))
 	mistakes = int(_restore.get("mistakes", 0))
@@ -680,6 +728,7 @@ func _persist_session() -> void:
 		"mode": mode,
 		"cats": cats,
 		"marks": marks,
+		"wrong": wrong_marks.keys(),
 		"elapsed": elapsed,
 		"hints": hints_used,
 		"mistakes": mistakes,
@@ -693,7 +742,7 @@ func _persist_session() -> void:
 ## legend chips (which rebuild nodes) wait until the finger lifts.
 func _sync_board(light := false) -> void:
 	if board != null:
-		board.sync(cats, marks)
+		board.sync(cats, marks, wrong_marks)
 	var placed := PuzzleModel.count_cats(cats)
 	progress_label.text = "%d / %d cats" % [placed, n]
 	if not light:

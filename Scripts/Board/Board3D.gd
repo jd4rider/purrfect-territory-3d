@@ -497,7 +497,9 @@ func fit_camera() -> void:
 # board state
 # --------------------------------------------------------------------------
 
-func sync(cats: Array, marks: Array) -> void:
+## `wrong` holds the keys (row * n + col) of squares a wrong cat was swept from,
+## so those crosses stay red instead of fading into the ordinary pencil mark.
+func sync(cats: Array, marks: Array, wrong := {}) -> void:
 	if n <= 0:
 		return
 	var half := (float(n) - 1.0) * 0.5
@@ -529,25 +531,41 @@ func sync(cats: Array, marks: Array) -> void:
 			var marked := false
 			if r < marks.size() and c < (marks[r] as Array).size():
 				marked = bool(marks[r][c])
-			if marked and not _marks.has(key):
-				var cross := _make_cross()
-				cross.position = Vector3(float(c) - half, TILE_TOP + 0.02, float(r) - half)
-				mark_root.add_child(cross)
-				_marks[key] = cross
-			elif not marked and _marks.has(key):
+			var is_wrong := wrong.has(key)
+			if marked:
+				# Undo can turn a crossed-out mistaken square back into a plain
+				# note, so the colour is part of what sync reconciles.
+				if _marks.has(key) and bool((_marks[key] as Node).get_meta("wrong", false)) != is_wrong:
+					(_marks[key] as Node3D).queue_free()
+					_marks.erase(key)
+				if not _marks.has(key):
+					var cross := _make_cross(is_wrong)
+					cross.position = Vector3(float(c) - half, TILE_TOP + 0.02, float(r) - half)
+					mark_root.add_child(cross)
+					_marks[key] = cross
+			elif _marks.has(key):
 				(_marks[key] as Node3D).queue_free()
 				_marks.erase(key)
 
 
-## A crisp X on the tile: minesweeper's cheap, reversible "not here" mark.
-func _make_cross() -> Node3D:
+## A crisp X on the tile: minesweeper's cheap, reversible "not here" mark, or
+## the red one left on a square a wrong cat was taken from.
+func _make_cross(wrong := false) -> Node3D:
 	var root := Node3D.new()
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color("#3b2545")
-	mat.roughness = 0.86
-	mat.emission_enabled = true
-	mat.emission = Color("#2a1d33")
-	mat.emission_energy_multiplier = 0.12
+	if wrong:
+		mat.albedo_color = Color("#d23f36")
+		mat.roughness = 0.72
+		mat.emission_enabled = true
+		mat.emission = Color("#ff5b4a")
+		mat.emission_energy_multiplier = 0.55
+	else:
+		mat.albedo_color = Color("#3b2545")
+		mat.roughness = 0.86
+		mat.emission_enabled = true
+		mat.emission = Color("#2a1d33")
+		mat.emission_energy_multiplier = 0.12
+	root.set_meta("wrong", wrong)
 	for angle in [45.0, -45.0]:
 		var bar := MeshInstance3D.new()
 		var box := BoxMesh.new()
@@ -594,6 +612,40 @@ func highlight(row: int, col: int, duration := 1.6) -> void:
 	tween.tween_callback(func() -> void:
 		if is_instance_valid(_highlight):
 			_highlight.visible = false)
+
+
+## A cat that leaves the puzzle unsolvable: a red X stamps down over it, the cat
+## is swept off the tile, and `on_done` runs once the tray is clear so the screen
+## can record the square as crossed out.
+func reject_cat(row: int, col: int, on_done: Callable) -> void:
+	if n <= 0 or row < 0 or col < 0 or row >= n or col >= n:
+		return
+	var half := (float(n) - 1.0) * 0.5
+	var cross := _make_cross(true)
+	cross.position = Vector3(float(col) - half, TILE_TOP + 0.03, float(row) - half)
+	cross.scale = Vector3(0.12, 1.0, 0.12)
+	mark_root.add_child(cross)
+	var view: CatView = _cats.get(row)
+	if view != null and not is_instance_valid(view):
+		view = null
+	var stamp := create_tween()
+	stamp.tween_property(cross, "scale", Vector3.ONE * 1.07, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	stamp.tween_property(cross, "scale", Vector3.ONE, 0.12)
+	if view != null:
+		var sweep := create_tween()
+		sweep.tween_interval(0.2)
+		sweep.tween_property(view, "scale", Vector3(0.02, 0.02, 0.02), 0.26).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	# Bound to this node, so a board torn down mid-animation cannot fire it.
+	var finish := create_tween()
+	finish.tween_interval(0.55)
+	finish.tween_callback(func() -> void:
+		if view != null and is_instance_valid(view):
+			view.queue_free()
+		_cats.erase(row)
+		if is_instance_valid(cross):
+			cross.queue_free()
+		if on_done.is_valid():
+			on_done.call())
 
 
 func celebrate() -> void:

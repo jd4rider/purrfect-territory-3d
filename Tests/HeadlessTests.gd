@@ -19,6 +19,7 @@ func _ready() -> void:
 	_test_save()
 	_test_audio()
 	_test_powerups()
+	_test_doomed_cats()
 	print("%d checks, %d failures, %d ms" % [checks, failures.size(), Time.get_ticks_msec() - started])
 	for failure in failures.slice(0, 30):
 		print("FAIL: ", failure)
@@ -251,6 +252,69 @@ func _test_powerups() -> void:
 			break
 		marks[pick.x][pick.y] = true
 	ok(mouse_ok, "the mouse only crosses out squares with no cat")
+
+
+## The completion check is what lets the game spot a cat that obeys every rule
+## but still makes the puzzle impossible.
+func _test_doomed_cats() -> void:
+	var level := Levels.get_level(7)
+	var n := int(level["n"])
+	var regions := LevelFactory.from_array(level["regions"])
+	var solution: Array = level["solution"]
+	var cats: Array = []
+	for r in range(n):
+		cats.append(-1)
+	ok(ExactSolver.has_completion(regions, n, cats), "an empty tray still has a completion")
+	ok(ExactSolver.has_completion(regions, n, solution), "the stored solution counts as complete")
+	# The first square that obeys the rules but is not the answer.
+	var wrong_row := -1
+	var wrong_col := -1
+	for r in range(n):
+		for c in range(n):
+			if c == int(solution[r]):
+				continue
+			if PowerUps.conflicts(regions, n, cats, r, c):
+				continue
+			wrong_row = r
+			wrong_col = c
+			break
+		if wrong_row >= 0:
+			break
+	ok(wrong_row >= 0, "level 7 offers a legal square that is not the answer")
+	if wrong_row >= 0:
+		cats[wrong_row] = wrong_col
+		ok(not ExactSolver.has_completion(regions, n, cats),
+			"a legal cat that is not the answer is flagged as unfinishable")
+		cats[wrong_row] = -1
+		cats[0] = int(solution[0])
+		ok(ExactSolver.has_completion(regions, n, cats), "a true cat keeps the board finishable")
+	# On a board with a single answer, a prefix can be completed exactly when it
+	# is part of that answer. Check every single cat at n = 4 and 5.
+	for size in [4, 5]:
+		var built := LevelFactory.produce(size, 777 + size, [])
+		if not bool(built["ok"]):
+			ok(false, "producer failed while checking completions at n=%d" % size)
+			continue
+		var probe_level: Dictionary = built["level"]
+		var probe_regions := LevelFactory.from_array(probe_level["regions"])
+		var probe_solution: Array = probe_level["solution"]
+		var probe: Array = []
+		for r in range(size):
+			probe.append(-1)
+		var disagree := 0
+		for r in range(size):
+			for c in range(size):
+				probe[r] = c
+				var truth := c == int(probe_solution[r])
+				if ExactSolver.has_completion(probe_regions, size, probe) != truth:
+					disagree += 1
+			probe[r] = -1
+		ok(disagree == 0, "completion check matches the true answer at n=%d (%d wrong)" % [size, disagree])
+	# Only the real answer survives a full tray.
+	var full := solution.duplicate()
+	full[int(n / 2)] = int(solution[int(n / 2)]) + 1 if int(solution[int(n / 2)]) + 1 < n else 0
+	ok(not ExactSolver.has_completion(regions, n, full),
+		"a complete tray with one cat moved has no completion")
 
 
 func _test_save() -> void:

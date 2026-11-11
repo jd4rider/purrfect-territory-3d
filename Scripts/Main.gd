@@ -303,6 +303,9 @@ func _run_command(command: String) -> void:
 		"tap":
 			if parts.size() > 2 and current_screen != null and current_screen.has_method("debug_tap"):
 				current_screen.call("debug_tap", int(parts[1]), int(parts[2]))
+		"cat":
+			if parts.size() > 2 and current_screen != null and current_screen.has_method("debug_double_tap"):
+				current_screen.call("debug_double_tap", int(parts[1]), int(parts[2]))
 		"hint":
 			if current_screen != null and current_screen.has_method("_hint"):
 				current_screen.call("_hint")
