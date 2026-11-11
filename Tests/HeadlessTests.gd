@@ -17,6 +17,7 @@ func _ready() -> void:
 	_test_novelty()
 	_test_hints()
 	_test_save()
+	_test_audio()
 	_test_powerups()
 	print("%d checks, %d failures, %d ms" % [checks, failures.size(), Time.get_ticks_msec() - started])
 	for failure in failures.slice(0, 30):
@@ -218,9 +219,25 @@ func _test_powerups() -> void:
 		marks.append(row)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 424242
-	var cat_pick := PowerUps.hidden_cat(cats, solution, rng)
+	var cat_pick := PowerUps.hidden_cat(regions, n, cats, solution, rng)
 	ok(cat_pick.x >= 0 and cat_pick.y == int(solution[cat_pick.x]),
 		"the cat power-up unearths a real cat")
+	# A true cat revealed next to the player's own cat would put a board on
+	# screen that breaks the no-touching rule, so those rows must be skipped.
+	var wrong := cats.duplicate()
+	wrong[1] = int(solution[1]) + 1 if int(solution[1]) + 1 < n else int(solution[1]) - 1
+	var revealed_conflict := false
+	for seed_value in range(40):
+		var probe := RandomNumberGenerator.new()
+		probe.seed = 1000 + seed_value
+		var candidate := PowerUps.hidden_cat(regions, n, wrong, solution, probe)
+		if candidate.x == 0:
+			revealed_conflict = true
+			break
+		if candidate.x > 0 and PowerUps.conflicts(regions, n, wrong, candidate.x, candidate.y):
+			revealed_conflict = true
+			break
+	ok(not revealed_conflict, "the cat power-up never reveals a cat that would break a rule")
 	var bad := 0
 	for at: Vector2i in HumanSolver.excluded_cells(regions, n, cats, marks):
 		if int(solution[at.x]) == at.y:
@@ -250,3 +267,19 @@ func _test_save() -> void:
 	ok(Chapters.count() == 10, "there are ten chapters")
 	ok(Chapters.size_for(1) == 4, "level one is a 4x4 tutorial")
 	ok(Chapters.chapter_of(1000) == 9, "level 1000 is in the last chapter")
+
+
+func _test_audio() -> void:
+	var bed := Audio._looped(Audio.MUSIC_DIR + "focus.wav")
+	ok(bed != null, "the focus bed loads")
+	ok(is_same(Audio._looped(Audio.MUSIC_DIR + "focus.wav"), bed), "the looped bed is cached, not rebuilt")
+	Audio.play_music("focus")
+	var stream := Audio._music.stream
+	Audio.play_music("focus")
+	ok(is_same(Audio._music.stream, stream), "re-requesting the running bed keeps the same stream")
+	Audio.kick()
+	ok(is_same(Audio._music.stream, stream), "a tap does not restart the running bed")
+	Audio.play_music("cozy")
+	ok(not is_same(Audio._music.stream, stream), "changing mood swaps the bed")
+	Audio.stop_music()
+	ok(not Audio._music.playing, "stopping music halts the bed")

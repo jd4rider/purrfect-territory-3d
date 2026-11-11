@@ -533,9 +533,13 @@ func _use_powerup(kind: String) -> void:
 func _use_cat() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.randomize()
-	var pick := PowerUps.hidden_cat(cats, solution, rng)
+	var pick := PowerUps.hidden_cat(regions, n, cats, solution, rng)
 	if pick.x < 0:
-		_show_toast("Every row already has its cat.")
+		# Never spend the charge on a cat that would break a rule.
+		if PuzzleModel.count_cats(cats) >= n:
+			_show_toast("Every row already has its cat.")
+		else:
+			_show_toast("No hidden cat fits beside these cats — one of them can't be right. Undo it and try again.")
 		return
 	if not Save.consume_powerup("cat"):
 		return
@@ -647,7 +651,12 @@ func _restore_state() -> void:
 	var stored_cats: Array = _restore.get("cats", [])
 	if stored_cats.size() == n:
 		for r in range(n):
-			cats[r] = clampi(int(stored_cats[r]), -1, n - 1)
+			var col := clampi(int(stored_cats[r]), -1, n - 1)
+			# A tray restored from an old or interrupted save must never come back
+			# with cats that break the rules: that board could never be solved.
+			if col >= 0 and PowerUps.conflicts(regions, n, cats, r, col):
+				col = -1
+			cats[r] = col
 	var stored_marks: Array = _restore.get("marks", [])
 	if stored_marks.size() == n:
 		for r in range(n):

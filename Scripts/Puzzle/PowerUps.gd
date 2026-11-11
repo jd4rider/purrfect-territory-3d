@@ -9,16 +9,40 @@ extends RefCounted
 ## Everything here is derived from the player's current board, never from a
 ## stored arrangement, so an assist can never contradict the rules on screen.
 
-## Picks a row that has no cat yet and returns the solution's cat for it.
-static func hidden_cat(cats: Array, solution: Array, rng: RandomNumberGenerator) -> Vector2i:
+## Picks a row that has no cat yet and returns the solution's cat for it, but
+## only when that cat fits beside the cats already on the tray. Revealing a true
+## cat next to a player's mistaken one would put an illegal board on screen.
+static func hidden_cat(regions: PackedInt32Array, n: int, cats: Array, solution: Array,
+		rng: RandomNumberGenerator) -> Vector2i:
 	var rows: Array = []
 	for r in range(mini(cats.size(), solution.size())):
-		if int(cats[r]) < 0:
-			rows.append(r)
+		if int(cats[r]) >= 0:
+			continue
+		if conflicts(regions, n, cats, r, int(solution[r])):
+			continue
+		rows.append(r)
 	if rows.is_empty():
 		return Vector2i(-1, -1)
 	var row := int(rows[rng.randi_range(0, rows.size() - 1)])
 	return Vector2i(row, int(solution[row]))
+
+
+## True when a cat at (row, col) would share a column or a territory with a cat
+## already placed, or touch one, even corner to corner.
+static func conflicts(regions: PackedInt32Array, n: int, cats: Array, row: int, col: int) -> bool:
+	for r in range(n):
+		if r == row or r >= cats.size():
+			continue
+		var other := int(cats[r])
+		if other < 0:
+			continue
+		if other == col:
+			return true
+		if absi(r - row) == 1 and absi(other - col) <= 1:
+			return true
+		if regions.size() >= n * n and regions[r * n + other] == regions[row * n + col]:
+			return true
+	return false
 
 
 ## A square that cannot hold a cat. Human-style exclusions come first so the X

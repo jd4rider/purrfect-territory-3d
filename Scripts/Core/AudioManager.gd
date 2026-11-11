@@ -15,6 +15,7 @@ var _cache: Dictionary = {}
 var _players: Array[AudioStreamPlayer] = []
 var _music: AudioStreamPlayer
 var _mood := ""
+var _playing_mood := ""
 var _kicked := false
 
 
@@ -31,6 +32,10 @@ func _ready() -> void:
 
 
 func kick() -> void:
+	# Called on every gesture, so it must stay free once audio is running:
+	# restarting the bed on each tap is the bug this guard prevents.
+	if _kicked and _music != null and _music.playing:
+		return
 	_kicked = true
 	if _mood != "":
 		play_music(_mood)
@@ -54,6 +59,11 @@ func _stream(path: String) -> AudioStream:
 
 
 func _looped(path: String) -> AudioStream:
+	# One looped instance per track. Duplicating on every call made `play_music`
+	# see a "new" stream each time and restart the song from the beginning.
+	var key := "loop:" + path
+	if _cache.has(key):
+		return _cache[key]
 	var stream := _stream(path)
 	if stream is AudioStreamWAV:
 		var copy := (stream as AudioStreamWAV).duplicate() as AudioStreamWAV
@@ -62,7 +72,9 @@ func _looped(path: String) -> AudioStream:
 		var bytes := 2 if copy.format == AudioStreamWAV.FORMAT_16_BITS else 1
 		var channels := 2 if copy.stereo else 1
 		copy.loop_end = int(copy.data.size() / (bytes * channels))
+		_cache[key] = copy
 		return copy
+	_cache[key] = stream
 	return stream
 
 
@@ -123,17 +135,23 @@ func star(index: int) -> void:
 
 func play_music(mood: String) -> void:
 	_mood = mood
+	if _music == null:
+		return
+	# Same track already running: keep the playhead instead of starting over.
+	if _playing_mood == mood and _music.playing:
+		return
 	var stream := _looped(MUSIC_DIR + mood + ".wav")
 	if stream == null:
 		return
-	if _music.stream == stream and _music.playing:
-		return
 	_music.stream = stream
 	_music.volume_db = linear_to_db(maxf(0.02, music_volume)) - 6.0
+	_playing_mood = mood
 	if _kicked:
 		_music.play()
 
 
 func stop_music() -> void:
 	_mood = ""
-	_music.stop()
+	_playing_mood = ""
+	if _music != null:
+		_music.stop()
