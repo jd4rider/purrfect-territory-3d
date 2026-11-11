@@ -33,16 +33,28 @@ var progress_label: Label
 var toast_label: Label
 var toast_timer: Timer
 var legend_row: HBoxContainer
-var hint_count_label: Label
 var win_layer: Control
 var win_card: VBoxContainer
 var _win_star_row: StarRow
 var _win_stats: Label
+var _win_power: Label
+
+var _drag_painting := false
+var _drag_value := true
+var _power_buttons: Dictionary = {}
+var _power_tick := 0.0
+var _restore: Dictionary = {}
+var _clue_layer: Control
+var _clue_text: Label
+var _clue_row := -1
+var _clue_col := -1
 
 
 func configure(payload: Dictionary) -> void:
 	level = payload.get("level", {})
 	mode = String(payload.get("mode", "campaign"))
+	var saved: Variant = payload.get("resume", {})
+	_restore = saved if typeof(saved) == TYPE_DICTIONARY else {}
 
 
 func _ready() -> void:
@@ -60,7 +72,9 @@ func _ready() -> void:
 		for c in range(n):
 			row.append(false)
 		marks.append(row)
+	_restore_state()
 	_build_hud()
+	_build_clue()
 	_build_win()
 	call_deferred("_start_board")
 	Audio.play_music("focus")
@@ -74,9 +88,16 @@ func _start_board() -> void:
 	})
 	board.cell_tapped.connect(_on_cell)
 	board.cell_double_tapped.connect(_on_double_cell)
+	board.drag_started.connect(_on_drag_started)
+	board.drag_moved.connect(_on_drag_moved)
+	board.drag_ended.connect(_on_drag_ended)
+	board.set_safe_area(168.0, 184.0)
 	board.fit_camera()
 	_sync_board()
-	_show_toast("Tap to cross out · double-tap to place a cat")
+	if _restore.is_empty():
+		_show_toast("Tap to cross out · hold and drag for a row · double-tap for a cat")
+	else:
+		_show_toast("Welcome back — the tray is as you left it.")
 
 
 func _process(delta: float) -> void:
@@ -84,6 +105,10 @@ func _process(delta: float) -> void:
 		elapsed += delta
 		if timer_label != null:
 			timer_label.text = Ui.format_time(int(elapsed))
+		_power_tick += delta
+		if _power_tick >= 1.0:
+			_power_tick = 0.0
+			_refresh_powerups()
 
 
 # --------------------------------------------------------------------------
@@ -95,7 +120,7 @@ func _build_hud() -> void:
 	top.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	top.add_theme_constant_override("margin_left", 16)
 	top.add_theme_constant_override("margin_right", 16)
-	top.add_theme_constant_override("margin_top", 30)
+	top.add_theme_constant_override("margin_top", 32)
 	add_child(top)
 	var top_column := Ui.column(8)
 	top.add_child(top_column)
@@ -103,25 +128,25 @@ func _build_hud() -> void:
 	var header := Ui.row(8)
 	top_column.add_child(header)
 	var back := Ui.ghost("<", func() -> void:
-		_leave(), 46, 20, 12)
-	back.custom_minimum_size.x = 54
+		_leave(), 52, 22, 12)
+	back.custom_minimum_size.x = 60
 	header.add_child(back)
-	title_label = Ui.label(String(level.get("title", "Puzzle")), 20, Ui.INK, HORIZONTAL_ALIGNMENT_CENTER)
+	title_label = Ui.label(String(level.get("title", "Puzzle")), 22, Ui.INK, HORIZONTAL_ALIGNMENT_CENTER)
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.clip_text = true
 	header.add_child(title_label)
-	timer_label = Ui.label("0:00", 17, Ui.GOLD, HORIZONTAL_ALIGNMENT_CENTER)
-	timer_label.custom_minimum_size.x = 62
+	timer_label = Ui.label("0:00", 18, Ui.GOLD, HORIZONTAL_ALIGNMENT_CENTER)
+	timer_label.custom_minimum_size.x = 66
 	header.add_child(timer_label)
 
 	var meta := Ui.row(8)
 	top_column.add_child(meta)
 	var chapter_data: Dictionary = Chapters.get_chapter(int(level.get("chapter", 0)))
-	var chapter_label := Ui.label(String(chapter_data["name"]), 13, Ui.MUTED)
+	var chapter_label := Ui.label(String(chapter_data["name"]), 14, Ui.MUTED)
 	chapter_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	meta.add_child(chapter_label)
-	meta.add_child(Ui.pill(difficulty, 12, Ui.MINT))
-	progress_label = Ui.label("0 / %d cats" % n, 13, Ui.MUTED, HORIZONTAL_ALIGNMENT_RIGHT)
+	meta.add_child(Ui.pill(difficulty, 13, Ui.MINT))
+	progress_label = Ui.label("0 / %d cats" % n, 14, Ui.MUTED, HORIZONTAL_ALIGNMENT_RIGHT)
 	meta.add_child(progress_label)
 
 	# The colours still missing a cat, in the same order as the territories.
@@ -131,12 +156,12 @@ func _build_hud() -> void:
 	top_column.add_child(legend_row)
 
 	# toast sits just above the controls, where the eye already is
-	toast_label = Ui.label("", 16, Ui.GOLD, HORIZONTAL_ALIGNMENT_CENTER, true)
+	toast_label = Ui.label("", 17, Ui.GOLD, HORIZONTAL_ALIGNMENT_CENTER, true)
 	toast_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	toast_label.offset_left = 24
 	toast_label.offset_right = -24
-	toast_label.offset_top = -196
-	toast_label.offset_bottom = -140
+	toast_label.offset_top = -258
+	toast_label.offset_bottom = -196
 	toast_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	toast_label.visible = false
 	add_child(toast_label)
@@ -150,27 +175,38 @@ func _build_hud() -> void:
 
 	var bottom := MarginContainer.new()
 	bottom.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	bottom.add_theme_constant_override("margin_left", 14)
-	bottom.add_theme_constant_override("margin_right", 14)
-	bottom.add_theme_constant_override("margin_bottom", 26)
+	bottom.add_theme_constant_override("margin_left", 12)
+	bottom.add_theme_constant_override("margin_right", 12)
+	bottom.add_theme_constant_override("margin_bottom", 24)
 	add_child(bottom)
 	var controls := Ui.column(10)
 	bottom.add_child(controls)
+
+	# The three earned assists. A spent one shows its refill countdown.
+	var powers := Ui.row(8)
+	controls.add_child(powers)
+	for kind in Save.POWERUP_KINDS:
+		powers.add_child(_power_button(String(kind)))
 
 	var actions := Ui.row(8)
 	controls.add_child(actions)
 	actions.add_child(_action("Undo", func() -> void: _undo()))
 	actions.add_child(_action("Redo", func() -> void: _redo()))
-	var hint_button := _action("Hint", func() -> void: _hint())
-	hint_count_label = Ui.label("", 12, Ui.MUTED, HORIZONTAL_ALIGNMENT_CENTER)
-	hint_button.add_child(hint_count_label)
-	actions.add_child(hint_button)
 	actions.add_child(_action("Reset", func() -> void: _reset()))
+	_refresh_powerups()
 
 
 func _action(text: String, on_press: Callable) -> Button:
-	var node := Ui.ghost(text, on_press, 58, 16, 8)
+	var node := Ui.ghost(text, on_press, 62, 17, 8)
 	node.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	return node
+
+
+func _power_button(kind: String) -> Button:
+	var node := Ui.ghost("", func() -> void: _use_powerup(kind), 64, 15, 6)
+	node.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	node.add_theme_color_override("font_disabled_color", Ui.DIM)
+	_power_buttons[kind] = node
 	return node
 
 
@@ -200,7 +236,7 @@ func _on_cell(row: int, col: int) -> void:
 
 ## A quick second tap on the same square commits the cat, minesweeper style.
 func _on_double_cell(row: int, col: int) -> void:
-	if solved or row < 0 or col < 0 or row >= n or col >= n:
+	if solved or not _in_bounds(row, col):
 		return
 	if int(cats[row]) == col:
 		_push_undo()
@@ -208,6 +244,13 @@ func _on_double_cell(row: int, col: int) -> void:
 		Audio.unplace()
 		_sync_board()
 		return
+	_commit_cat(row, col)
+
+
+## Places a cat if the rules allow it. Returns false (and explains why) when the
+## square would break a rule, so the tap, the clue and the cat power-up all go
+## through the same check.
+func _commit_cat(row: int, col: int) -> bool:
 	var old := int(cats[row])
 	_push_undo()
 	cats[row] = col
@@ -216,13 +259,57 @@ func _on_double_cell(row: int, col: int) -> void:
 		cats[row] = old
 		_undo_stack_pop_quiet()
 		_reject(row, col, problem)
-		return
+		return false
 	marks[row][col] = false
 	Audio.place()
 	_sync_board()
-	if board != null:
-		board.sync(cats, marks)
 	_check_win()
+	return true
+
+
+func _in_bounds(row: int, col: int) -> bool:
+	return row >= 0 and col >= 0 and row < n and col < n
+
+
+# --------------------------------------------------------------------------
+# drag painting
+# --------------------------------------------------------------------------
+
+## A held finger paints one value across every square it crosses: marking if the
+## first square was clear, clearing if it was already crossed out. The whole
+## sweep is a single undo step.
+func _on_drag_started(row: int, col: int) -> void:
+	if solved or not _in_bounds(row, col):
+		return
+	if int(cats[row]) == col:
+		_drag_painting = false
+		return
+	_push_undo()
+	_drag_painting = true
+	_drag_value = not bool(marks[row][col])
+	_paint_cell(row, col)
+
+
+func _on_drag_moved(row: int, col: int) -> void:
+	if _drag_painting:
+		_paint_cell(row, col)
+
+
+func _on_drag_ended() -> void:
+	if not _drag_painting:
+		return
+	_drag_painting = false
+	Audio.mark()
+	_sync_board()
+
+
+func _paint_cell(row: int, col: int) -> void:
+	if not _in_bounds(row, col) or int(cats[row]) == col:
+		return
+	if bool(marks[row][col]) == _drag_value:
+		return
+	marks[row][col] = _drag_value
+	_sync_board(true)
 
 
 ## Returns a player-facing reason when the cat in (row, col) breaks a rule, or an
@@ -322,7 +409,7 @@ func _reset(ask_sound := true) -> void:
 	mistakes = 0
 	hints_used = 0
 	elapsed = 0.0
-	_update_hint_count()
+	_refresh_powerups()
 	_sync_board()
 
 
@@ -334,20 +421,218 @@ func _hint() -> void:
 		_show_toast(String(normal.get("text", "No hint available.")))
 		return
 	hints_used += 1
-	_update_hint_count()
 	Audio.hint()
 	if board != null:
 		board.highlight(int(normal["row"]), int(normal["col"]), 4.0)
 	_show_toast(String(normal["text"]))
 
 
-func _sync_board() -> void:
+# --------------------------------------------------------------------------
+# power-ups
+# --------------------------------------------------------------------------
+
+func _powerup_name(kind: String) -> String:
+	match kind:
+		"cat":
+			return "Cat"
+		"clue":
+			return "Clue"
+		_:
+			return "Mouse"
+
+
+## Shows the stock on each button, and the refill countdown when it is empty.
+func _refresh_powerups() -> void:
+	for kind in _power_buttons.keys():
+		var button: Button = _power_buttons[kind]
+		if button == null or not is_instance_valid(button):
+			continue
+		var count := Save.powerup_count(String(kind))
+		button.disabled = solved or count <= 0
+		if count > 0:
+			button.text = "%s %d" % [_powerup_name(String(kind)), count]
+		else:
+			button.text = "%s\n%s" % [_powerup_name(String(kind)),
+				Ui.format_time(Save.powerup_seconds_left(String(kind)))]
+
+
+func _use_powerup(kind: String) -> void:
+	if solved:
+		return
+	if Save.powerup_count(kind) <= 0:
+		_show_toast("%s is recharging — %s to go." % [_powerup_name(kind),
+			Ui.format_time(Save.powerup_seconds_left(kind))])
+		return
+	match kind:
+		"cat":
+			_use_cat()
+		"clue":
+			_open_clue()
+		"mouse":
+			_use_mouse()
+
+
+## Cat: one cat that is still hidden on the tray, placed on its real square.
+func _use_cat() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	var pick := PowerUps.hidden_cat(cats, solution, rng)
+	if pick.x < 0:
+		_show_toast("Every row already has its cat.")
+		return
+	if not Save.consume_powerup("cat"):
+		return
+	_push_undo()
+	cats[pick.x] = pick.y
+	marks[pick.x][pick.y] = false
+	Audio.place()
+	_sync_board()
+	_refresh_powerups()
+	if board != null:
+		board.highlight(pick.x, pick.y, 1.6)
+	_show_toast("A cat padded out of hiding.")
+	_check_win()
+
+
+## Mouse: crosses out a square that cannot hold a cat, following a rule a player
+## could have worked out themselves where one applies.
+func _use_mouse() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	var pick := PowerUps.safe_mark(regions, n, cats, marks, solution, rng)
+	if pick.x < 0:
+		_show_toast("There is nothing left that is safely empty.")
+		return
+	if not Save.consume_powerup("mouse"):
+		return
+	_push_undo()
+	marks[pick.x][pick.y] = true
+	Audio.mark()
+	_sync_board()
+	_refresh_powerups()
+	if board != null:
+		board.highlight(pick.x, pick.y, 1.6)
+	_show_toast("The mouse scratched an X where no cat can be.")
+
+
+# --------------------------------------------------------------------------
+# clue card
+# --------------------------------------------------------------------------
+
+func _build_clue() -> void:
+	_clue_layer = Control.new()
+	_clue_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_clue_layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	_clue_layer.visible = false
+	add_child(_clue_layer)
+	var dim := ColorRect.new()
+	dim.color = Color(0.06, 0.04, 0.08, 0.58)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_clue_layer.add_child(dim)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_clue_layer.add_child(center)
+	var card := Ui.panel(Color("#241830"), 26, Color("#5b3f74"), 20)
+	card.custom_minimum_size = Vector2(344, 0)
+	center.add_child(card)
+	var column := Ui.column(12)
+	card.add_child(column)
+	column.add_child(Ui.label("A clue", 23, Ui.CREAM, HORIZONTAL_ALIGNMENT_CENTER))
+	_clue_text = Ui.label("", 17, Ui.MUTED, HORIZONTAL_ALIGNMENT_CENTER, true)
+	_clue_text.custom_minimum_size.y = 96
+	column.add_child(_clue_text)
+	column.add_child(Ui.button("Place that cat", 18, 56, Ui.GOLD, func() -> void:
+		_apply_clue()))
+	column.add_child(Ui.ghost("Keep thinking", func() -> void:
+		_clue_layer.visible = false, 52, 16))
+
+
+## The charge buys the explanation; applying it afterwards is free, because the
+## cat is already on screen and highlighted.
+func _open_clue() -> void:
+	var normal := HumanSolver.hint(regions, n, cats, marks,
+		Chapters.region_names(int(level.get("chapter", 0))))
+	if not bool(normal.get("ok", false)):
+		_show_toast(String(normal.get("text", "No clue is available right now.")))
+		return
+	if not Save.consume_powerup("clue"):
+		return
+	hints_used += 1
+	Audio.hint()
+	_clue_row = int(normal["row"])
+	_clue_col = int(normal["col"])
+	_clue_text.text = String(normal["text"])
+	_clue_layer.visible = true
+	if board != null:
+		board.highlight(_clue_row, _clue_col, 8.0)
+	_refresh_powerups()
+	_persist_session()
+
+
+func _apply_clue() -> void:
+	if _clue_layer != null:
+		_clue_layer.visible = false
+	if _clue_row < 0:
+		return
+	if _commit_cat(_clue_row, _clue_col):
+		_show_toast("The clue's cat is on the tray.")
+	_clue_row = -1
+	_clue_col = -1
+
+
+# --------------------------------------------------------------------------
+# resume
+# --------------------------------------------------------------------------
+
+func _restore_state() -> void:
+	if _restore.is_empty():
+		return
+	var stored_cats: Array = _restore.get("cats", [])
+	if stored_cats.size() == n:
+		for r in range(n):
+			cats[r] = clampi(int(stored_cats[r]), -1, n - 1)
+	var stored_marks: Array = _restore.get("marks", [])
+	if stored_marks.size() == n:
+		for r in range(n):
+			var row: Array = stored_marks[r]
+			if row.size() != n:
+				continue
+			for c in range(n):
+				marks[r][c] = bool(row[c])
+	elapsed = float(_restore.get("elapsed", 0.0))
+	hints_used = int(_restore.get("hints", 0))
+	mistakes = int(_restore.get("mistakes", 0))
+
+
+## Written after every committed change, so a browser reload or a trip out of
+## the tab puts the same tray back on the screen.
+func _persist_session() -> void:
+	if solved or n <= 0:
+		return
+	Save.save_session({
+		"level": level,
+		"mode": mode,
+		"cats": cats,
+		"marks": marks,
+		"elapsed": elapsed,
+		"hints": hints_used,
+		"mistakes": mistakes,
+	})
+	# A phone can kill the tab without warning, so the tray goes to disk now
+	# rather than on the save timer.
+	Save.flush()
+
+
+## `light` is for the middle of a drag: the 3D marks still update, but the
+## legend chips (which rebuild nodes) wait until the finger lifts.
+func _sync_board(light := false) -> void:
 	if board != null:
 		board.sync(cats, marks)
 	var placed := PuzzleModel.count_cats(cats)
 	progress_label.text = "%d / %d cats" % [placed, n]
-	_refresh_legend()
-	_update_hint_count()
+	if not light:
+		_refresh_legend()
+		_persist_session()
 
 
 func _level_colors() -> Array:
@@ -378,10 +663,10 @@ func _refresh_legend() -> void:
 
 func _legend_chip(color: Color, revealed: bool) -> Control:
 	var node := Control.new()
-	node.custom_minimum_size = Vector2(26, 26)
+	node.custom_minimum_size = Vector2(28, 28)
 	node.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	node.draw.connect(func() -> void:
-		var center := Vector2(13, 13)
+		var center := Vector2(14, 14)
 		if revealed:
 			node.draw_arc(center, 9.5, 0.0, TAU, 28, Color(color, 0.42), 2.0)
 			return
@@ -393,11 +678,6 @@ func _legend_chip(color: Color, revealed: bool) -> Control:
 		node.draw_circle(center + Vector2(0, -4.4), 1.9, ink)
 		node.draw_circle(center + Vector2(4.4, -3.0), 1.9, ink))
 	return node
-
-
-func _update_hint_count() -> void:
-	if hint_count_label != null:
-		hint_count_label.text = "  hint %d" % hints_used if hints_used > 0 else ""
 
 
 func _check_win() -> void:
@@ -416,6 +696,7 @@ func _check_win() -> void:
 func _finish() -> void:
 	solved = true
 	running = false
+	Save.clear_session()
 	var stars := 3
 	if hints_used > 0:
 		stars -= 1
@@ -424,20 +705,25 @@ func _finish() -> void:
 	stars = maxi(1, stars)
 	var level_id := int(level.get("id", 0))
 	var unlocked: Array = []
+	var earned := ""
 	if level_id > 0:
 		var result := Save.record_solve(level_id, stars, elapsed, hints_used, mistakes,
 			"campaign", difficulty, n)
 		unlocked = result.get("unlocked", [])
+		earned = String(result.get("powerup", ""))
 	elif mode == "daily":
 		var result := Save.record_solve(0, stars, elapsed, hints_used, mistakes, "daily", difficulty, n)
 		unlocked = result.get("unlocked", [])
+		earned = String(result.get("powerup", ""))
 	else:
 		var result := Save.record_solve(0, stars, elapsed, hints_used, mistakes, "practice", difficulty, n)
 		unlocked = result.get("unlocked", [])
+		earned = String(result.get("powerup", ""))
 	if board != null:
 		board.celebrate()
 	Audio.win()
-	_show_win(stars, unlocked)
+	_refresh_powerups()
+	_show_win(stars, unlocked, earned)
 
 
 func _build_win() -> void:
@@ -465,6 +751,8 @@ func _build_win() -> void:
 	win_card.add_child(_win_star_row)
 	_win_stats = Ui.label("", 14, Ui.MUTED, HORIZONTAL_ALIGNMENT_CENTER, true)
 	win_card.add_child(_win_stats)
+	_win_power = Ui.label("", 14, Ui.MINT, HORIZONTAL_ALIGNMENT_CENTER, true)
+	win_card.add_child(_win_power)
 	var extra := Ui.label("", 13, Ui.GOLD, HORIZONTAL_ALIGNMENT_CENTER, true)
 	extra.name = "Extra"
 	win_card.add_child(extra)
@@ -477,7 +765,9 @@ func _build_win() -> void:
 		Router.go("levels", {"chapter": int(level.get("chapter", 0))}), 50, 16))
 
 
-func _show_win(stars: int, unlocked: Array) -> void:
+func _show_win(stars: int, unlocked: Array, earned := "") -> void:
+	if _win_power != null:
+		_win_power.text = ("Power-up earned: %s" % _powerup_name(earned)) if not earned.is_empty() else ""
 	_win_star_row.filled = stars
 	_win_star_row.animate_in()
 	_win_stats.text = "%s  ·  %d hint%s  ·  %d wrong guess%s" % [
@@ -526,6 +816,7 @@ func _play_again() -> void:
 
 
 func _leave() -> void:
+	Save.clear_session()
 	Audio.ui_back()
 	if mode == "campaign":
 		Router.go("levels", {"chapter": int(level.get("chapter", 0))})
@@ -570,4 +861,10 @@ func debug_state() -> Dictionary:
 		"hints": hints_used,
 		"stars": Save.stars_for(int(level.get("id", 0))) if int(level.get("id", 0)) > 0 else 0,
 		"mark_mode": mark_mode,
+		"dragging": _drag_painting,
+		"powerups": {
+			"cat": Save.powerup_count("cat"),
+			"clue": Save.powerup_count("clue"),
+			"mouse": Save.powerup_count("mouse"),
+		},
 	}

@@ -17,6 +17,7 @@ func _ready() -> void:
 	_test_novelty()
 	_test_hints()
 	_test_save()
+	_test_powerups()
 	print("%d checks, %d failures, %d ms" % [checks, failures.size(), Time.get_ticks_msec() - started])
 	for failure in failures.slice(0, 30):
 		print("FAIL: ", failure)
@@ -183,6 +184,58 @@ func _test_hints() -> void:
 		"hint text survives region names")
 
 
+func _test_powerups() -> void:
+	var backup: Dictionary = Save.data.duplicate(true)
+	var now := int(Time.get_unix_time_from_system())
+	Save.data["powerups"] = {
+		"cat": {"count": 1, "at": now},
+		"clue": {"count": Save.POWERUP_MAX, "at": now},
+		"mouse": {"count": 0, "at": now - Save.POWERUP_INTERVAL * 2},
+	}
+	Save._settle_powerups()
+	ok(Save.powerup_count("mouse") == 2, "power-ups refill one charge every interval")
+	ok(Save.powerup_count("clue") == Save.POWERUP_MAX, "power-ups never exceed the cap")
+	ok(Save.consume_powerup("cat"), "a charge can be spent")
+	ok(Save.powerup_count("cat") == 0, "spending a charge decrements the stock")
+	ok(not Save.consume_powerup("cat"), "an empty power-up cannot be spent")
+	ok(Save.powerup_seconds_left("cat") > 0, "an empty power-up counts down to a refill")
+	ok(Save.powerup_seconds_left("clue") == 0, "a full power-up has no countdown")
+	Save.grant_powerup("cat", 9)
+	ok(Save.powerup_count("cat") == Save.POWERUP_MAX, "grants stop at the cap")
+	Save.data = backup
+
+	var level := Levels.get_level(1)
+	var n := int(level["n"])
+	var regions := LevelFactory.from_array(level["regions"])
+	var solution: Array = level["solution"]
+	var cats: Array = []
+	var marks: Array = []
+	for r in range(n):
+		cats.append(-1)
+		var row: Array = []
+		for c in range(n):
+			row.append(false)
+		marks.append(row)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 424242
+	var cat_pick := PowerUps.hidden_cat(cats, solution, rng)
+	ok(cat_pick.x >= 0 and cat_pick.y == int(solution[cat_pick.x]),
+		"the cat power-up unearths a real cat")
+	var bad := 0
+	for at: Vector2i in HumanSolver.excluded_cells(regions, n, cats, marks):
+		if int(solution[at.x]) == at.y:
+			bad += 1
+	ok(bad == 0, "human exclusions never rule out a cat")
+	var mouse_ok := true
+	for i in range(5):
+		var pick := PowerUps.safe_mark(regions, n, cats, marks, solution, rng)
+		if pick.x < 0 or int(solution[pick.x]) == pick.y:
+			mouse_ok = false
+			break
+		marks[pick.x][pick.y] = true
+	ok(mouse_ok, "the mouse only crosses out squares with no cat")
+
+
 func _test_save() -> void:
 	var defaults := Save._defaults()
 	ok(int(defaults["schema"]) == Save.SCHEMA_VERSION, "save schema version is set")
@@ -194,6 +247,6 @@ func _test_save() -> void:
 	var stars_before := Save.total_stars()
 	ok(stars_before >= 0, "star total is readable")
 	ok(Chapters.level_count() == 1000, "the campaign is 1,000 levels")
-	ok(Chapters.size() == 10, "there are ten chapters")
+	ok(Chapters.count() == 10, "there are ten chapters")
 	ok(Chapters.size_for(1) == 4, "level one is a 4x4 tutorial")
 	ok(Chapters.chapter_of(1000) == 9, "level 1000 is in the last chapter")

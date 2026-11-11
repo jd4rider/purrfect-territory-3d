@@ -56,22 +56,22 @@ func _ready() -> void:
 	var top := Control.new()
 	top.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_child(top)
-	_title = Ui.label("", 27, Ui.CREAM, HORIZONTAL_ALIGNMENT_CENTER, true)
+	_title = Ui.label("", 29, Ui.CREAM, HORIZONTAL_ALIGNMENT_CENTER, true)
 	column.add_child(_title)
 	_diagram = TutorialDiagram.new()
 	_diagram.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	column.add_child(_diagram)
-	_body = Ui.label("", 15, Ui.MUTED, HORIZONTAL_ALIGNMENT_CENTER, true)
-	_body.custom_minimum_size.y = 84
+	_body = Ui.label("", 17, Ui.MUTED, HORIZONTAL_ALIGNMENT_CENTER, true)
+	_body.custom_minimum_size.y = 96
 	column.add_child(_body)
 	_dots = Ui.label("", 12, Ui.GOLD, HORIZONTAL_ALIGNMENT_CENTER)
 	column.add_child(_dots)
 
 	var nav := Ui.row(10)
 	column.add_child(nav)
-	var back := Ui.ghost("Back", func() -> void: _step(-1), 52, 16)
+	var back := Ui.ghost("Back", func() -> void: _step(-1), 58, 17)
 	nav.add_child(back)
-	_next = Ui.button("Next", 18, 52, Ui.GOLD, func() -> void: _step(1))
+	_next = Ui.button("Next", 19, 58, Ui.GOLD, func() -> void: _step(1))
 	_next.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	nav.add_child(_next)
 

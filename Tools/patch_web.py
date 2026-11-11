@@ -27,13 +27,18 @@ TOUCH_SCRIPT = """\t	<script>
 (function () {
   var canvas = document.getElementById('canvas');
   if (!canvas) { return; }
-  function forward(event) {
-    var touch = event.changedTouches && event.changedTouches[0];
-    if (!touch || !window.__purrfectTouch) { return; }
-    var rect = canvas.getBoundingClientRect();
-    window.__purrfectTouch(touch.clientX, touch.clientY, rect.left, rect.top, rect.width, rect.height);
+  function forward(kind) {
+    return function (event) {
+      var touch = event.changedTouches && event.changedTouches[0];
+      if (!touch || !window.__purrfectTouch) { return; }
+      var rect = canvas.getBoundingClientRect();
+      window.__purrfectTouch(touch.clientX, touch.clientY, rect.left, rect.top, rect.width, rect.height, kind);
+    };
   }
-  canvas.addEventListener('touchend', forward, { passive: true });
+  canvas.addEventListener('touchstart', forward(1), { passive: true });
+  canvas.addEventListener('touchmove', forward(2), { passive: true });
+  canvas.addEventListener('touchend', forward(3), { passive: true });
+  canvas.addEventListener('touchcancel', forward(3), { passive: true });
 })();
 		</script>
 """
@@ -61,6 +66,14 @@ def main() -> int:
     html = re.sub(r'\s*<meta name="viewport"[^>]*>', "", html)
     if "arcade-bridge.js" not in html:
         html = html.replace("</head>", HEAD_INJECT + "</head>")
+    # Drop any forwarder from an earlier patch, then add the current one. This
+    # keeps the script honest when the export shell is patched more than once.
+    html = re.sub(
+        r"\s*<script>\s*\(function \(\) \{\s*var canvas = document\.getElementById\('canvas'\);.*?\)\(\);\s*</script>",
+        "",
+        html,
+        flags=re.S,
+    )
     if "__purrfectTouch" not in html:
         html = html.replace("</body>", TOUCH_SCRIPT + "\t</body>")
     index.write_text(html, encoding="utf-8")

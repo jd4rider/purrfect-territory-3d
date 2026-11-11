@@ -119,7 +119,7 @@ body {
 
 		<script src="index.js"></script>
 		<script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":1892128,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":1909468,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
 const GODOT_THREADS_ENABLED = false;
 const engine = new Engine(GODOT_CONFIG);
 
@@ -227,13 +227,18 @@ const engine = new Engine(GODOT_CONFIG);
 (function () {
   var canvas = document.getElementById('canvas');
   if (!canvas) { return; }
-  function forward(event) {
-    var touch = event.changedTouches && event.changedTouches[0];
-    if (!touch || !window.__purrfectTouch) { return; }
-    var rect = canvas.getBoundingClientRect();
-    window.__purrfectTouch(touch.clientX, touch.clientY, rect.left, rect.top, rect.width, rect.height);
+  function forward(kind) {
+    return function (event) {
+      var touch = event.changedTouches && event.changedTouches[0];
+      if (!touch || !window.__purrfectTouch) { return; }
+      var rect = canvas.getBoundingClientRect();
+      window.__purrfectTouch(touch.clientX, touch.clientY, rect.left, rect.top, rect.width, rect.height, kind);
+    };
   }
-  canvas.addEventListener('touchend', forward, { passive: true });
+  canvas.addEventListener('touchstart', forward(1), { passive: true });
+  canvas.addEventListener('touchmove', forward(2), { passive: true });
+  canvas.addEventListener('touchend', forward(3), { passive: true });
+  canvas.addEventListener('touchcancel', forward(3), { passive: true });
 })();
 		</script>
 	</body>

@@ -444,10 +444,8 @@ static func _bits(value: int) -> Array:
 # hints
 # --------------------------------------------------------------------------
 
-## Explains the next forced cat from the player's current board. `marks` is an
-## N x N array of booleans. Returns {ok, row, col, kind, text, solved}.
-static func hint(regions: PackedInt32Array, n: int, cats: Array, marks: Array,
-		region_names := []) -> Dictionary:
+## Turns the visible board (cats + crossed-out marks) into solver masks.
+static func _state_from(regions: PackedInt32Array, n: int, cats: Array, marks: Array) -> Dictionary:
 	var masks: Array = []
 	var state_cats: Array = []
 	for r in range(n):
@@ -473,7 +471,37 @@ static func hint(regions: PackedInt32Array, n: int, cats: Array, marks: Array,
 	for r in range(n):
 		if int(state_cats[r]) >= 0:
 			masks[r] = 1 << int(state_cats[r])
-	var state := {"masks": masks, "cats": state_cats}
+	return {"masks": masks, "cats": state_cats}
+
+
+## Every square the human techniques prove cannot hold a cat. The mouse
+## power-up uses this so its X follows a rule the player could have spotted.
+static func excluded_cells(regions: PackedInt32Array, n: int, cats: Array, marks: Array) -> Array:
+	var state := _state_from(regions, n, cats, marks)
+	var metrics := {"branches": 0, "max_depth": 0, "forced": 0, "kinds": {},
+		"max_candidates": n, "trace": []}
+	_deduce(state, regions, n, metrics)
+	var out: Array = []
+	var masks: Array = state["masks"]
+	var solved_rows: Array = state["cats"]
+	for r in range(n):
+		if int(solved_rows[r]) >= 0:
+			continue
+		for c in range(n):
+			if ((int(masks[r]) >> c) & 1) == 1:
+				continue
+			if r < marks.size() and c < (marks[r] as Array).size() and bool(marks[r][c]):
+				continue
+			out.append(Vector2i(r, c))
+	return out
+
+
+## Explains the next forced cat from the player's current board. `marks` is an
+## N x N array of booleans. Returns {ok, row, col, kind, text, solved}.
+static func hint(regions: PackedInt32Array, n: int, cats: Array, marks: Array,
+		region_names := []) -> Dictionary:
+	var state := _state_from(regions, n, cats, marks)
+	var state_cats: Array = state["cats"]
 	if _contradiction(state, regions, n):
 		return {
 			"ok": false,

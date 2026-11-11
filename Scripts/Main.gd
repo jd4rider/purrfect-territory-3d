@@ -30,8 +30,36 @@ func _ready() -> void:
 	_build_world()
 	_build_ui()
 	_debug_available = OS.has_feature("web")
-	show_screen("title")
-	Audio.play_music("cozy")
+	var resumed := _resume_payload()
+	if resumed.is_empty():
+		show_screen("title")
+		Audio.play_music("cozy")
+	else:
+		show_screen("game", resumed)
+
+
+func _notification(what: int) -> void:
+	# A phone can suspend or reload the page at any moment, so write the pending
+	# tray to disk before that happens.
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_GO_BACK_REQUEST \
+			or what == NOTIFICATION_WM_CLOSE_REQUEST:
+		if is_inside_tree():
+			Save.flush()
+
+
+## A puzzle that was left mid-solve (or interrupted by a page reload) comes back
+## exactly as it was instead of dropping the player on the title screen.
+func _resume_payload() -> Dictionary:
+	var saved: Dictionary = Save.session()
+	if saved.is_empty():
+		return {}
+	var raw: Variant = saved.get("level", {})
+	if typeof(raw) != TYPE_DICTIONARY:
+		return {}
+	var level: Dictionary = raw
+	if level.is_empty() or not level.has("regions") or not level.has("n"):
+		return {}
+	return {"level": level, "mode": String(saved.get("mode", "campaign")), "resume": saved}
 
 
 func _build_world() -> void:

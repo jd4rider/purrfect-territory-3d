@@ -28,8 +28,8 @@ func _ready() -> void:
 	column.add_child(header)
 	var back := Ui.ghost("<", func() -> void:
 		Audio.ui_back()
-		Router.go("chapters"), 44, 18, 12)
-	back.custom_minimum_size.x = 52
+		Router.go("chapters"), 52, 22, 12)
+	back.custom_minimum_size.x = 60
 	header.add_child(back)
 	var title := Ui.label(String(meta["name"]), 20, Ui.CREAM)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -43,8 +43,8 @@ func _ready() -> void:
 	column.add_child(scroll)
 	var grid := GridContainer.new()
 	grid.columns = 5
-	grid.add_theme_constant_override("h_separation", 8)
-	grid.add_theme_constant_override("v_separation", 8)
+	grid.add_theme_constant_override("h_separation", 9)
+	grid.add_theme_constant_override("v_separation", 9)
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(grid)
 
@@ -58,9 +58,9 @@ func _level_button(id: int, tint: Color) -> Button:
 	var unlocked := Save.is_unlocked(id)
 	var stars := Save.stars_for(id)
 	var button := Button.new()
-	button.custom_minimum_size = Vector2(0, 62)
+	button.custom_minimum_size = Vector2(0, 70)
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	button.add_theme_font_size_override("font_size", 17)
+	button.add_theme_font_size_override("font_size", 18)
 	var text := "%d" % ((id - 1) % Chapters.LEVELS_PER_CHAPTER + 1)
 	if stars > 0:
 		text += "\n" + Ui.stars_text(stars)

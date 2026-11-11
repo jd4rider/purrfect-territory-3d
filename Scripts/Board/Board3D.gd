@@ -10,6 +10,9 @@ extends Node3D
 
 signal cell_tapped(row: int, col: int)
 signal cell_double_tapped(row: int, col: int)
+signal drag_started(row: int, col: int)
+signal drag_moved(row: int, col: int)
+signal drag_ended()
 
 const TILE_MODEL := "res://Assets/Models/tile.glb"
 const CAT_MODEL := "res://Assets/Models/cat.glb"
@@ -45,12 +48,22 @@ var _showcase := false
 var _zoom := 1.0
 var _time := 0.0
 var _fit_pending := true
+var _safe_top := 0.0
+var _safe_bottom := 0.0
 var _last_engine_pointer_ms := -10000
 var _last_tap_ms := -10000
 var _last_tap_cell := Vector2i(-1, -1)
 var _web_touch_cb: JavaScriptObject
+var _engine_down := false
+var _web_grab := false
+var _press_active := false
+var _press_cell := Vector2i(-1, -1)
+var _press_point := Vector2.ZERO
+var _drag_active := false
+var _drag_cell := Vector2i(-1, -1)
 
 const DOUBLE_TAP_MS := 450
+const DRAG_SLOP := 10.0
 
 
 func _ready() -> void:
@@ -74,10 +87,10 @@ func _install_web_touch() -> void:
 	window.set("__purrfectTouch", _web_touch_cb)
 
 
+## The shell forwards start/move/end as a 7th argument (1, 2, 3). A gesture the
+## engine already sees is ignored end to end, so the two paths never both paint.
 func _on_web_touch(args: Array) -> void:
 	if _showcase or n <= 0 or args.size() < 6:
-		return
-	if Time.get_ticks_msec() - _last_engine_pointer_ms < 250:
 		return
 	var client := Vector2(float(args[0]), float(args[1]))
 	var rect := Rect2(float(args[2]), float(args[3]), float(args[4]), float(args[5]))
@@ -85,10 +98,21 @@ func _on_web_touch(args: Array) -> void:
 		return
 	var view := get_viewport().get_visible_rect().size
 	var position := (client - rect.position) / rect.size * view
-	var cell := cell_at(position)
-	if cell.x < 0:
+	var kind := 3
+	if args.size() > 6:
+		kind = int(args[6])
+	if kind == 1:
+		if _engine_down or Time.get_ticks_msec() - _last_engine_pointer_ms < 250:
+			return
+		_web_grab = true
+		_begin_press(position)
+	elif not _web_grab:
 		return
-	_handle_tap(cell)
+	elif kind == 2:
+		_move_press(position)
+	else:
+		_web_grab = false
+		_end_press()
 
 
 func _build_tree() -> void:
@@ -430,24 +454,42 @@ func _build_highlight() -> void:
 # camera
 # --------------------------------------------------------------------------
 
+## The HUD tells the board how many pixels the tray must stay clear of at the
+## top and bottom, so the tray uses the whole free band instead of sitting
+## behind the controls on a tall phone.
+func set_safe_area(top: float, bottom: float) -> void:
+	_safe_top = maxf(0.0, top)
+	_safe_bottom = maxf(0.0, bottom)
+	fit_camera()
+
+
 func fit_camera() -> void:
 	if camera == null or n <= 0:
 		return
 	var size := get_viewport().get_visible_rect().size
 	if size.x <= 1.0 or size.y <= 1.0:
 		return
+	var top := clampf(_safe_top, 0.0, size.y * 0.4)
+	var bottom := clampf(_safe_bottom, 0.0, size.y * 0.4)
+	var band := maxf(160.0, size.y - top - bottom)
 	var aspect := size.x / size.y
-	var span := float(n) + 1.55
+	var span := float(n) + 1.28
 	var vfov := deg_to_rad(camera.fov)
 	var hfov := 2.0 * atan(tan(vfov * 0.5) * aspect)
+	var band_fov := 2.0 * atan(tan(vfov * 0.5) * band / size.y)
 	var tilt := deg_to_rad(63.0)
 	var by_width := (span * 0.52) / tan(hfov * 0.5)
 	var projected_depth := span * sin(tilt) * 0.55 + span * 0.16
-	var by_height := projected_depth / tan(vfov * 0.5)
+	var by_height := projected_depth / tan(band_fov * 0.5)
 	var distance := maxf(by_width, by_height) * 1.02 * _zoom
 	var target := Vector3(0, 0.05, 0)
 	camera.position = target + Vector3(0, sin(tilt), cos(tilt)) * distance
 	camera.look_at(target, Vector3.UP)
+	# The bands are rarely equal: slide the projection so the tray is centred in
+	# the free area rather than in the raw viewport.
+	var centre := top + band * 0.5
+	var world_per_pixel := 2.0 * distance * tan(vfov * 0.5) / size.y
+	camera.v_offset = (centre - size.y * 0.5) * world_per_pixel
 
 
 # --------------------------------------------------------------------------
@@ -576,28 +618,101 @@ func shake_cat(row: int) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if _showcase or n <= 0:
 		return
-	var position := Vector2.ZERO
-	var pressed := false
 	if event is InputEventScreenTouch:
-		_last_engine_pointer_ms = Time.get_ticks_msec()
 		var touch := event as InputEventScreenTouch
-		if not touch.pressed:
-			return
-		position = touch.position
-		pressed = true
-	elif event is InputEventMouseButton:
 		_last_engine_pointer_ms = Time.get_ticks_msec()
+		_engine_down = touch.pressed
+		_web_grab = false
+		if touch.pressed:
+			_begin_press(touch.position)
+		else:
+			_end_press()
+		if _press_active or touch.pressed:
+			get_viewport().set_input_as_handled()
+		return
+	if event is InputEventScreenDrag:
+		_last_engine_pointer_ms = Time.get_ticks_msec()
+		if _engine_down:
+			_move_press((event as InputEventScreenDrag).position)
+			if _drag_active or _press_active:
+				get_viewport().set_input_as_handled()
+		return
+	if event is InputEventMouseButton:
 		var click := event as InputEventMouseButton
-		if click.button_index != MOUSE_BUTTON_LEFT or not click.pressed:
+		if click.button_index != MOUSE_BUTTON_LEFT:
 			return
-		position = click.position
-		pressed = true
-	if not pressed:
+		_last_engine_pointer_ms = Time.get_ticks_msec()
+		_engine_down = click.pressed
+		_web_grab = false
+		if click.pressed:
+			_begin_press(click.position)
+		else:
+			_end_press()
+		if _press_active or click.pressed:
+			get_viewport().set_input_as_handled()
+		return
+	if event is InputEventMouseMotion and _engine_down:
+		_last_engine_pointer_ms = Time.get_ticks_msec()
+		_move_press((event as InputEventMouseMotion).position)
+
+
+## A press only becomes a drag once the finger reaches a different square, so a
+## tap still means "cross this one out" and a swept finger crosses out a row.
+func _begin_press(position: Vector2) -> void:
+	var cell := cell_at(position)
+	_press_active = cell.x >= 0
+	_press_cell = cell
+	_press_point = position
+	_drag_active = false
+	_drag_cell = cell
+
+
+func _move_press(position: Vector2) -> void:
+	if not _press_active:
 		return
 	var cell := cell_at(position)
 	if cell.x < 0:
 		return
-	get_viewport().set_input_as_handled()
+	if not _drag_active:
+		if cell == _press_cell and position.distance_to(_press_point) < DRAG_SLOP:
+			return
+		_drag_active = true
+		_drag_cell = _press_cell
+		drag_started.emit(_press_cell.x, _press_cell.y)
+	if cell == _drag_cell:
+		return
+	for step: Vector2i in _cells_between(_drag_cell, cell):
+		_drag_cell = step
+		drag_moved.emit(step.x, step.y)
+
+
+## The cells a fast finger skipped over, one orthogonal-ish step at a time.
+func _cells_between(from: Vector2i, to: Vector2i) -> Array:
+	var out: Array = []
+	var at := from
+	var guard := 0
+	while at != to and guard < 32:
+		guard += 1
+		at.x += signi(to.x - at.x)
+		at.y += signi(to.y - at.y)
+		out.append(at)
+	return out
+
+
+func _end_press() -> void:
+	if not _press_active:
+		return
+	var cell := _press_cell
+	var was_drag := _drag_active
+	_press_active = false
+	_drag_active = false
+	_drag_cell = Vector2i(-1, -1)
+	if was_drag:
+		# A drag must never count as the first half of a double tap.
+		_last_tap_ms = -10000
+		_last_tap_cell = Vector2i(-1, -1)
+		drag_ended.emit()
+		return
 	_handle_tap(cell)
 
 

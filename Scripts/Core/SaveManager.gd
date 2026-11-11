@@ -13,6 +13,17 @@ const SAVE_PATH := "user://purrfect_territory_save.json"
 const BACKUP_PATH := "user://purrfect_territory_save.corrupt.json"
 const SCHEMA_VERSION := 1
 
+## Earned assists refill over wall-clock time, one charge per kind per interval,
+## and stop at POWERUP_MAX. Solving a puzzle also grants one.
+const POWERUP_KINDS: Array = ["cat", "clue", "mouse"]
+const POWERUP_MAX := 3
+const POWERUP_INTERVAL := 600
+
+## The in-progress tray also lives in localStorage on the web. Godot's user://
+## filesystem is IndexedDB-backed and syncs asynchronously, so a page reload can
+## beat the write; localStorage is synchronous and always there on the next boot.
+const SESSION_KEY := "purrfect_territory_session_v1"
+
 const ACHIEVEMENTS: Array = [
 	{"id": "first_purr", "name": "First Purr", "hint": "Solve your first territory.", "stat": "solved", "need": 1},
 	{"id": "solved_5", "name": "Settling In", "hint": "Solve five puzzles.", "stat": "solved", "need": 5},
@@ -94,6 +105,14 @@ static func _defaults() -> Dictionary:
 			"chapters": {},
 			"daily_dates": {},
 		},
+		"powerups": {
+			"cat": {"count": 1, "at": 0},
+			"clue": {"count": 1, "at": 0},
+			"mouse": {"count": 1, "at": 0},
+		},
+		# The puzzle currently on the tray, so a reload (or a jump out to the
+		# browser) can put the player back exactly where they were.
+		"session": {},
 		"achievements": {},
 	}
 
@@ -127,6 +146,7 @@ func load_data() -> void:
 		return
 	data = _merge(parsed, _defaults())
 	data["schema"] = SCHEMA_VERSION
+	_settle_powerups()
 	changed.emit()
 
 
@@ -285,9 +305,10 @@ func record_solve(id: int, stars: int, seconds: float, hints_used: int, mistakes
 		data["stats"]["big_boards"] = int(data["stats"]["big_boards"]) + 1
 	data["stats"]["streak"] = _streak()
 	var unlocked := check_achievements()
+	var reward := powerup_solve_reward()
 	queue_save()
 	changed.emit()
-	return {"unlocked": unlocked, "stars": stars_total()}
+	return {"unlocked": unlocked, "stars": stars_total(), "powerup": reward}
 
 
 func stars_total() -> int:
@@ -297,6 +318,164 @@ func stars_total() -> int:
 func register_mistake() -> void:
 	data["stats"]["mistakes"] = int(data["stats"]["mistakes"]) + 1
 	queue_save()
+
+
+# --------------------------------------------------------------------------
+# power-ups
+# --------------------------------------------------------------------------
+
+## Awaited before every read: the clock, not an event, is what refills them.
+func _settle_powerups() -> void:
+	var store: Variant = data.get("powerups", {})
+	if typeof(store) != TYPE_DICTIONARY:
+		store = {}
+		data["powerups"] = store
+	var now := int(Time.get_unix_time_from_system())
+	var changed_any := false
+	for kind in POWERUP_KINDS:
+		var raw: Variant = (store as Dictionary).get(kind, null)
+		if typeof(raw) != TYPE_DICTIONARY:
+			(store as Dictionary)[kind] = {"count": 1, "at": now}
+			changed_any = true
+			continue
+		var entry: Dictionary = raw
+		var count := int(entry.get("count", 0))
+		var at := int(entry.get("at", 0))
+		if at <= 0:
+			entry["at"] = now
+			at = now
+			changed_any = true
+		if count >= POWERUP_MAX:
+			continue
+		var gained := int((now - at) / POWERUP_INTERVAL)
+		if gained > 0:
+			entry["count"] = mini(POWERUP_MAX, count + gained)
+			entry["at"] = at + gained * POWERUP_INTERVAL
+			changed_any = true
+	if changed_any:
+		queue_save()
+
+
+func powerup_count(kind: String) -> int:
+	_settle_powerups()
+	var store: Dictionary = data.get("powerups", {})
+	var entry: Variant = store.get(kind, {})
+	if typeof(entry) != TYPE_DICTIONARY:
+		return 0
+	return int((entry as Dictionary).get("count", 0))
+
+
+func powerup_seconds_left(kind: String) -> int:
+	_settle_powerups()
+	var store: Dictionary = data.get("powerups", {})
+	var entry: Dictionary = store.get(kind, {})
+	var count := int(entry.get("count", 0))
+	if count >= POWERUP_MAX:
+		return 0
+	var at := int(entry.get("at", 0))
+	if at <= 0:
+		return POWERUP_INTERVAL
+	return clampi(POWERUP_INTERVAL - (int(Time.get_unix_time_from_system()) - at), 0, POWERUP_INTERVAL)
+
+
+func grant_powerup(kind: String, amount := 1) -> bool:
+	_settle_powerups()
+	var store: Dictionary = data.get("powerups", {})
+	var entry: Dictionary = store.get(kind, {})
+	var count := int(entry.get("count", 0))
+	if count >= POWERUP_MAX:
+		return false
+	entry["count"] = mini(POWERUP_MAX, count + amount)
+	if int(entry.get("at", 0)) <= 0:
+		entry["at"] = int(Time.get_unix_time_from_system())
+	store[kind] = entry
+	queue_save()
+	changed.emit()
+	return true
+
+
+func consume_powerup(kind: String) -> bool:
+	_settle_powerups()
+	var store: Dictionary = data.get("powerups", {})
+	var entry: Dictionary = store.get(kind, {})
+	var count := int(entry.get("count", 0))
+	if count <= 0:
+		return false
+	# Leaving a full stock starts the refill clock now; spending a partial one
+	# keeps its existing countdown, so nothing is thrown away.
+	if count >= POWERUP_MAX:
+		entry["at"] = int(Time.get_unix_time_from_system())
+	entry["count"] = count - 1
+	store[kind] = entry
+	queue_save()
+	changed.emit()
+	return true
+
+
+## One charge per solve, rotating through the three kinds.
+func powerup_solve_reward() -> String:
+	var solved := int(data["stats"]["solved"])
+	var kind := String(POWERUP_KINDS[solved % POWERUP_KINDS.size()])
+	if grant_powerup(kind):
+		return kind
+	return ""
+
+
+# --------------------------------------------------------------------------
+# in-progress puzzle (survives a reload)
+# --------------------------------------------------------------------------
+
+func session() -> Dictionary:
+	var stashed := _web_session()
+	if not stashed.is_empty():
+		return stashed
+	var current: Variant = data.get("session", {})
+	return current if typeof(current) == TYPE_DICTIONARY else {}
+
+
+func save_session(payload: Dictionary) -> void:
+	data["session"] = payload
+	_stash_web_session(payload)
+	queue_save()
+
+
+func clear_session() -> void:
+	var current: Dictionary = session()
+	if current.is_empty():
+		return
+	data["session"] = {}
+	_clear_web_session()
+	queue_save()
+
+
+## Base64 keeps the JSON safe through the JavaScript bridge whatever the
+## territory names contain. All three calls are no-ops off the web.
+func _stash_web_session(payload: Dictionary) -> void:
+	if not OS.has_feature("web"):
+		return
+	var encoded := Marshalls.utf8_to_base64(JSON.stringify(payload))
+	JavaScriptBridge.eval(
+		"try{localStorage.setItem('%s','%s')}catch(e){}" % [SESSION_KEY, encoded], true)
+
+
+func _web_session() -> Dictionary:
+	if not OS.has_feature("web"):
+		return {}
+	var raw: Variant = JavaScriptBridge.eval(
+		"(function(){try{return localStorage.getItem('%s')||''}catch(e){return ''}})()" % SESSION_KEY, true)
+	if raw == null:
+		return {}
+	var encoded := String(raw)
+	if encoded.is_empty():
+		return {}
+	var parsed: Variant = JSON.parse_string(Marshalls.base64_to_utf8(encoded))
+	return parsed if typeof(parsed) == TYPE_DICTIONARY else {}
+
+
+func _clear_web_session() -> void:
+	if not OS.has_feature("web"):
+		return
+	JavaScriptBridge.eval("try{localStorage.removeItem('%s')}catch(e){}" % SESSION_KEY, true)
 
 
 func daily_key() -> String:
@@ -392,5 +571,6 @@ func reset_progress() -> void:
 	data["settings"] = settings
 	data["profile"] = profile
 	data["created"] = created
+	_clear_web_session()
 	queue_save()
 	changed.emit()
