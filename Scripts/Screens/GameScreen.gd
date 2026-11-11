@@ -43,6 +43,9 @@ var _drag_painting := false
 var _drag_value := true
 var _power_buttons: Dictionary = {}
 var _power_tick := 0.0
+var _top_bar: MarginContainer
+var _bottom_bar: MarginContainer
+var _compact := false
 var _restore: Dictionary = {}
 var _clue_layer: Control
 var _clue_text: Label
@@ -60,6 +63,10 @@ func configure(payload: Dictionary) -> void:
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_PASS
+	# Inside the arcade the game gets a shorter viewport than a full phone
+	# screen (the portal keeps a header and a footer), so the chrome shrinks a
+	# little rather than pushing the tray into a letterbox.
+	_compact = get_viewport().get_visible_rect().size.y < 720.0
 	n = int(level.get("n", 5))
 	regions = LevelFactory.from_array(level.get("regions", []))
 	solution = level.get("solution", [])
@@ -91,8 +98,13 @@ func _start_board() -> void:
 	board.drag_started.connect(_on_drag_started)
 	board.drag_moved.connect(_on_drag_moved)
 	board.drag_ended.connect(_on_drag_ended)
-	board.set_safe_area(168.0, 184.0)
-	board.fit_camera()
+	board.set_safe_area(160.0, 176.0)
+	call_deferred("_apply_safe_area")
+	if not resized.is_connected(_apply_safe_area):
+		resized.connect(_apply_safe_area)
+	# The arcade client mounts its account button from a DOM event, which can
+	# land just after this screen is built.
+	get_tree().create_timer(1.5).timeout.connect(_apply_safe_area)
 	_sync_board()
 	if _restore.is_empty():
 		_show_toast("Tap to cross out · hold and drag for a row · double-tap for a cat")
@@ -115,20 +127,60 @@ func _process(delta: float) -> void:
 # HUD
 # --------------------------------------------------------------------------
 
+## The tray is centred in whatever the bars leave free, measured from the bars
+## themselves. Hardcoded band sizes put the tray behind the controls as soon as
+## the viewport was shorter than a full phone screen.
+func _apply_safe_area() -> void:
+	if board == null:
+		return
+	_apply_chip_lane()
+	var top_h := _top_bar.size.y if _top_bar != null else 152.0
+	var bottom_h := _bottom_bar.size.y if _bottom_bar != null else 168.0
+	board.set_safe_area(top_h + 8.0, bottom_h + 4.0)
+
+
+## The arcade client floats its round account button in the bottom-left corner.
+## The controls leave that lane empty rather than drawing Undo underneath it.
+func _apply_chip_lane() -> void:
+	if _bottom_bar == null:
+		return
+	var inset := 12.0
+	if OS.has_feature("web"):
+		var css := 0.0
+		var raw: Variant = JavaScriptBridge.eval("window.__ljaChipInset || 0", true)
+		if raw != null:
+			css = float(raw)
+		if css > 0.0:
+			var design_w := maxf(1.0, get_viewport().get_visible_rect().size.x)
+			var raw_w: Variant = JavaScriptBridge.eval("window.innerWidth || 0", true)
+			var css_w := 1.0 if raw_w == null else maxf(1.0, float(raw_w))
+			# Design pixels, so the lane stays the same physical width as the
+			# button at every phone size.
+			inset += css * design_w / css_w
+	_bottom_bar.add_theme_constant_override("margin_left", int(round(inset)))
+
+
 func _build_hud() -> void:
+	var power_h := 54 if _compact else 64
+	var action_h := 54 if _compact else 62
+	var gap := 8 if _compact else 10
+	var bottom_margin := 14 if _compact else 24
+	var top_margin := 24 if _compact else 32
+
 	var top := MarginContainer.new()
 	top.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	top.add_theme_constant_override("margin_left", 16)
 	top.add_theme_constant_override("margin_right", 16)
-	top.add_theme_constant_override("margin_top", 32)
+	top.add_theme_constant_override("margin_top", top_margin)
 	add_child(top)
+	_top_bar = top
 	var top_column := Ui.column(8)
 	top.add_child(top_column)
 
 	var header := Ui.row(8)
 	top_column.add_child(header)
 	var back := Ui.ghost("<", func() -> void:
-		_leave(), 52, 22, 12)
+		_leave(), 46 if _compact else 52, 22, 12)
 	back.custom_minimum_size.x = 60
 	header.add_child(back)
 	title_label = Ui.label(String(level.get("title", "Puzzle")), 22, Ui.INK, HORIZONTAL_ALIGNMENT_CENTER)
@@ -156,12 +208,13 @@ func _build_hud() -> void:
 	top_column.add_child(legend_row)
 
 	# toast sits just above the controls, where the eye already is
+	var toast_bottom := bottom_margin + power_h + gap + action_h + 6
 	toast_label = Ui.label("", 17, Ui.GOLD, HORIZONTAL_ALIGNMENT_CENTER, true)
 	toast_label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	toast_label.offset_left = 24
 	toast_label.offset_right = -24
-	toast_label.offset_top = -258
-	toast_label.offset_bottom = -196
+	toast_label.offset_top = -(toast_bottom + 62)
+	toast_label.offset_bottom = -toast_bottom
 	toast_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	toast_label.visible = false
 	add_child(toast_label)
@@ -175,35 +228,39 @@ func _build_hud() -> void:
 
 	var bottom := MarginContainer.new()
 	bottom.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	# The block hangs off the bottom edge, so it has to grow upwards. Without
+	# this the whole control row is laid out below the screen and disappears.
+	bottom.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	bottom.add_theme_constant_override("margin_left", 12)
 	bottom.add_theme_constant_override("margin_right", 12)
-	bottom.add_theme_constant_override("margin_bottom", 24)
+	bottom.add_theme_constant_override("margin_bottom", bottom_margin)
 	add_child(bottom)
-	var controls := Ui.column(10)
+	_bottom_bar = bottom
+	var controls := Ui.column(gap)
 	bottom.add_child(controls)
 
 	# The three earned assists. A spent one shows its refill countdown.
 	var powers := Ui.row(8)
 	controls.add_child(powers)
 	for kind in Save.POWERUP_KINDS:
-		powers.add_child(_power_button(String(kind)))
+		powers.add_child(_power_button(String(kind), power_h))
 
 	var actions := Ui.row(8)
 	controls.add_child(actions)
-	actions.add_child(_action("Undo", func() -> void: _undo()))
-	actions.add_child(_action("Redo", func() -> void: _redo()))
-	actions.add_child(_action("Reset", func() -> void: _reset()))
+	actions.add_child(_action("Undo", func() -> void: _undo(), action_h))
+	actions.add_child(_action("Redo", func() -> void: _redo(), action_h))
+	actions.add_child(_action("Reset", func() -> void: _reset(), action_h))
 	_refresh_powerups()
 
 
-func _action(text: String, on_press: Callable) -> Button:
-	var node := Ui.ghost(text, on_press, 62, 17, 8)
+func _action(text: String, on_press: Callable, height := 62) -> Button:
+	var node := Ui.ghost(text, on_press, height, 17, 8)
 	node.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	return node
 
 
-func _power_button(kind: String) -> Button:
-	var node := Ui.ghost("", func() -> void: _use_powerup(kind), 64, 15, 6)
+func _power_button(kind: String, height := 64) -> Button:
+	var node := Ui.ghost("", func() -> void: _use_powerup(kind), height, 15, 6)
 	node.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	node.add_theme_color_override("font_disabled_color", Ui.DIM)
 	_power_buttons[kind] = node
@@ -866,5 +923,10 @@ func debug_state() -> Dictionary:
 			"cat": Save.powerup_count("cat"),
 			"clue": Save.powerup_count("clue"),
 			"mouse": Save.powerup_count("mouse"),
+		},
+		"ui": {
+			"compact": _compact,
+			"top": [_top_bar.position.y, _top_bar.size.y] if _top_bar != null else [],
+			"bottom": [_bottom_bar.position.y, _bottom_bar.size.y] if _bottom_bar != null else [],
 		},
 	}

@@ -427,9 +427,10 @@ func _grout_strip(position: Vector3, size: Vector3, mat: StandardMaterial3D) -> 
 func _build_decor() -> void:
 	var yarn := _instance_model(YARN_MODEL)
 	if yarn != null:
-		# Rest it on the table beside the tray rather than floating at tile height.
-		yarn.scale = Vector3.ONE * 1.6
-		yarn.position = Vector3(float(n) * 0.5 + 0.55, -0.3, -float(n) * 0.5 + 0.25)
+		# Rest it on the table in front of the tray's near corner. The camera
+		# frames only the tray, so anything beside the back edge is cropped.
+		yarn.scale = Vector3.ONE * 1.15
+		yarn.position = Vector3(float(n) * 0.5 + 0.26, -0.3, float(n) * 0.5 + 0.62)
 		decor_root.add_child(yarn)
 
 

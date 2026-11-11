@@ -607,6 +607,10 @@
     shadow.appendChild(toggle)
     shadow.appendChild(panel)
     document.body.appendChild(root)
+    // The round account button floats over the bottom-left corner. Games lay
+    // their own controls out around this number of CSS pixels instead of
+    // painting underneath it.
+    window.__ljaChipInset = 62
 
     ui = { toggle: toggle, panel: panel, email: email, password: password, status: status, who: who, signedOut: signedOut, signedIn: signedIn }
     render()
